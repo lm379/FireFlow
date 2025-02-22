@@ -1,0 +1,50 @@
+{
+    "tencentcloud": {
+        "secretId": "",
+        "secretKey": "",
+        "lighthouse": [
+            {
+                "region": "",
+                "instanceId": "",
+                "firewallRules": [
+                    {
+                        "Protocol": "TCP",
+                        "Port": "ALL",
+                        "Action": "ACCEPT",
+                        "FirewallRuleDescription": "DynamicIPRule"
+                    },
+                    {
+                        "Protocol": "UDP",
+                        "Port": "ALL",
+                        "Action": "ACCEPT",
+                        "FirewallRuleDescription": "DynamicIPRule"
+                    },
+                    {
+                        "Protocol": "ICMP",
+                        "Port": "ALL",
+                        "Action": "ACCEPT",
+                        "FirewallRuleDescription": "DynamicIPRule"
+                    }
+                ]
+            }
+        ]
+    },
+    "aliyun": {
+        "accessKeyId": "",
+        "accessKeySecret": "",
+        "ecs": [
+            {
+                "RegionId": "",
+                "SecurityGroupId": "",
+                "Permissions": [
+                    {
+                        "PortRange": "-1/-1",
+                        "IpProtocol": "ALL",
+                        "Policy": "Accept",
+                        "Description": "DynamicIPRule"
+                    }
+                ]
+            }
+        ]
+    }
+}

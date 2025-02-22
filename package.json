@@ -1,0 +1,18 @@
+{
+  "name": "updatefirewall",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "node index.js"
+  },
+  "author": "lm379",
+  "license": "MIT",
+  "description": "",
+  "dependencies": {
+    "@alicloud/ecs20140526": "^6.0.0",
+    "@alicloud/openapi-client": "^0.4.12",
+    "@alicloud/tea-console": "^1.0.0",
+    "axios": "^1.7.9",
+    "tencentcloud-sdk-nodejs-lighthouse": "^4.0.1034"
+  }
+}
