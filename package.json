@@ -11,6 +11,7 @@
   "dependencies": {
     "@alicloud/ecs20140526": "^6.0.0",
     "@alicloud/openapi-client": "^0.4.12",
+    "@alicloud/swas-open20200601": "^3.0.3",
     "@alicloud/tea-console": "^1.0.0",
     "axios": "^1.7.9",
     "tencentcloud-sdk-nodejs-lighthouse": "^4.0.1034"

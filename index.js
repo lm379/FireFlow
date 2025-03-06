@@ -12,12 +12,12 @@ function getTimeStamp() {
     return new Date().toLocaleString('zh-CN', { hour12: false });
 }
 
-console.log = function() {
+console.log = function () {
     const args = Array.from(arguments);
     originalConsole.log(`[${getTimeStamp()}]`, ...args);
 }
 
-console.error = function() {
+console.error = function () {
     const args = Array.from(arguments);
     originalConsole.error(`[${getTimeStamp()}]`, ...args);
 }
@@ -36,7 +36,9 @@ async function updateAllFirewallRules() {
     try {
         // 读取配置文件
         const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
-        
+        if (config.tag == null || config.tag == "") {
+            throw new Error('请在配置文件中填写tag');
+        }
         // 获取当前IP
         const currentIp = await getCurrentIp();
         console.log(`当前IP地址: ${currentIp}`);
@@ -45,7 +47,7 @@ async function updateAllFirewallRules() {
         const providers = CloudProviderFactory.createProviders(config);
 
         // 并行更新所有云提供商的防火墙规则
-        await Promise.all(providers.map(provider => 
+        await Promise.all(providers.map(provider =>
             provider.updateFirewallRules(currentIp).catch(error => {
                 console.error(`更新失败 [${provider.constructor.name}]:`, error.message);
             })
