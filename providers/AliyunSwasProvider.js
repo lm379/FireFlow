@@ -23,7 +23,7 @@ class AliyunSwasProvider extends AliyunProvider {
 
     // 删除旧规则
     async revokeSecurityGroup(securityGroupId, rule, runtime) {
-        await this.client.deleteFirewallRulesWithOptions(new SWAS_OPEN20200601.DeleteFirewallRulesRequest({
+        await this.client.deleteFirewallRuleWithOptions(new SWAS_OPEN20200601.DeleteFirewallRuleRequest({
             instanceId: this.config.InstanceId,
             ruleId: rule.ruleId,
             regionId: this.config.RegionId
@@ -36,13 +36,13 @@ class AliyunSwasProvider extends AliyunProvider {
             console.error('阿里云轻量应用云服务器: 不支持的协议类型');
             return;
         }
-        if (rule.RuleProtocol == 'ICMP') {
-            rule.Port = '-1/-1';
-        }
         // 如果端口范围相同，则只取前一个，阿里云接口是这么写的，不然会报错
         const regex = /^(\d+)\/\1$/;
         if (regex.test(rule.Port)) {
             rule.Port = rule.Port.match(regex)[1];
+        }
+        if (rule.RuleProtocol == 'ICMP') {
+            rule.Port = '-1/-1';
         }
         let firewallRules = new SWAS_OPEN20200601.CreateFirewallRulesRequestFirewallRules({
             ruleProtocol: rule.RuleProtocol,

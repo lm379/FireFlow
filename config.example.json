@@ -1,4 +1,5 @@
 {
+    "tag": "DynamicIPRule",
     "tencentcloud": {
         "secretId": "",
         "secretKey": "",
@@ -32,6 +33,8 @@
     "aliyun": {
         "accessKeyId": "",
         "accessKeySecret": "",
+        "ecs_enable": true,
+        "swas_enable": false,
         "ecs": [
             {
                 "RegionId": "",
@@ -40,11 +43,42 @@
                     {
                         "PortRange": "-1/-1",
                         "IpProtocol": "ALL",
-                        "Policy": "Accept",
-                        "Description": "DynamicIPRule"
+                        "Policy": "Accept"
+                    },
+                    {
+                        "PortRange": "1/65535",
+                        "IpProtocol": "TCP",
+                        "Policy": "Accept"
+                    }
+                ]
+            }
+        ],
+        "swas": [
+            {
+                "InstanceId": "",
+                "RegionId": "",
+                "Permissions": [
+                    {
+                        "RuleProtocol": "TCP",
+                        "Port": "1234/1234"
+                    },
+                    {
+                        "RuleProtocol": "UDP",
+                        "Port": "1234/1234"
+                    }
+                ]
+            },
+            {
+                "InstanceId": "",
+                "RegionId": "",
+                "Permissions": [
+                    {
+                        "RuleProtocol": "TCP+UDP",
+                        "Port": "1234/1234"
                     }
                 ]
             }
         ]
-    }
+    },
+    "huaweicloud": {}
 }

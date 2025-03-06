@@ -14,11 +14,12 @@ class AliyunEcsProvider extends AliyunProvider {
 
     // 获取现有规则
     async describeSecurityGroupAttribute(securityGroupId, runtime) {
-        return await this.client.describeSecurityGroupAttribute(new Ecs20140526.DescribeSecurityGroupAttributeRequest({
+        let resp =  await this.client.describeSecurityGroupAttribute(new Ecs20140526.DescribeSecurityGroupAttributeRequest({
             securityGroupId: securityGroupId,
             direction: 'ingress',
             regionId: this.config.RegionId
         }), runtime);
+        return resp.body.permissions.permission;
     }
 
     // 删除旧规则
