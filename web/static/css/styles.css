@@ -1,0 +1,330 @@
+* { 
+    box-sizing: border-box; 
+}
+
+body { 
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; 
+    margin: 0; 
+    padding: 0;
+    background-color: #f5f5f5; 
+    color: #333;
+}
+
+.header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1rem 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.header .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+.nav-tabs {
+    display: flex;
+    background: white;
+    border-radius: 8px 8px 0 0;
+    margin-top: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.nav-tab {
+    flex: 1;
+    padding: 15px;
+    text-align: center;
+    cursor: pointer;
+    background: #f8f9fa;
+    border: none;
+    font-size: 16px;
+    font-weight: 500;
+    color: #666;
+    transition: all 0.3s ease;
+}
+
+.nav-tab.active {
+    background: white;
+    color: #667eea;
+    border-bottom: 3px solid #667eea;
+}
+
+.nav-tab:hover {
+    background: #e9ecef;
+}
+
+.container { 
+    max-width: 1200px; 
+    margin: 0 auto; 
+    padding: 0 20px;
+}
+
+.tab-content {
+    background: white;
+    border-radius: 0 0 8px 8px;
+    padding: 30px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    min-height: 600px;
+}
+
+.tab-pane {
+    display: none;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+.form-section {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 30px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #555;
+}
+
+input, select, textarea, button { 
+    width: 100%;
+    padding: 12px; 
+    border-radius: 6px; 
+    border: 1px solid #ddd; 
+    font-size: 14px;
+    transition: border-color 0.3s ease;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white; 
+    cursor: pointer; 
+    border: none;
+    font-weight: 600;
+    transition: transform 0.2s ease;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+}
+
+.btn-secondary {
+    background: #6c757d;
+}
+
+.btn-danger {
+    background: #dc3545;
+}
+
+.btn-success {
+    background: #28a745;
+}
+
+.btn-small {
+    padding: 8px 16px;
+    font-size: 12px;
+    width: auto;
+    margin: 0 5px;
+}
+
+table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+th, td { 
+    padding: 15px; 
+    text-align: left; 
+    border-bottom: 1px solid #eee; 
+}
+
+th {
+    background: #f8f9fa;
+    font-weight: 600;
+    color: #666;
+}
+
+tr:hover {
+    background: #f8f9fa;
+}
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.status-enabled {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-disabled {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+}
+
+.modal-content {
+    background: white;
+    margin: 10% auto;
+    padding: 30px;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 600px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #eee;
+}
+
+.close {
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    color: #999;
+}
+
+.close:hover {
+    color: #333;
+}
+
+.alert {
+    padding: 12px 20px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+}
+
+.alert-success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.alert-error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        /* 系统设置特有样式 */
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .settings-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+        }
+
+        .settings-card h4 {
+            margin: 0 0 20px 0;
+            color: #495057;
+            font-size: 18px;
+            font-weight: 600;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .settings-card h5 {
+            margin: 20px 0 15px 0;
+            color: #6c757d;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .settings-card small {
+            display: block;
+            color: #6c757d;
+            font-size: 12px;
+            margin-top: 5px;
+            line-height: 1.4;
+        }
+
+        .settings-card .form-section {
+            background: white;
+            margin: 20px -10px 0 -10px;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .settings-card .form-section h5 {
+            margin-top: 0;
+        }.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.settings-card {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.settings-card h4 {
+    margin-top: 0;
+    color: #667eea;
+    border-bottom: 2px solid #f0f0f0;
+    padding-bottom: 10px;
+}
+
+small {
+    color: #666;
+    font-size: 12px;
+}

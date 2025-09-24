@@ -16,7 +16,6 @@ import (
 )
 
 func main() {
-	// 1. Load Configuration
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("./configs")
@@ -24,21 +23,28 @@ func main() {
 		log.Fatalf("Error reading config file: %s", err)
 	}
 
-	// 2. Initialize Database
 	db, err := gorm.Open(sqlite.Open(viper.GetString("database.path")), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	// Auto-migrate the schema
-	if err := db.AutoMigrate(&model.FirewallRule{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.FirewallRule{},
+		&model.ConfigItem{},
+		&model.CloudProviderConfig{},
+		&model.CronJobConfig{},
+	); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 
-	// 3. Setup Dependencies
+	// Initialize repositories
 	firewallRepo := repository.NewFirewallRepo(db)
-	firewallService := service.NewFirewallService(firewallRepo)
+	configRepo := repository.NewConfigRepository(db)
 
-	// 4. Start Cron Job
+	// Initialize services
+	firewallService := service.NewFirewallService(firewallRepo)
+	configService := service.NewConfigService(configRepo)
+
 	cronManager := core.NewCronManager()
 	err = cronManager.AddFirewallUpdateJob(func() {
 		firewallService.UpdateAllRules()
@@ -48,7 +54,6 @@ func main() {
 	}
 	cronManager.Start()
 
-	// 5. Setup Gin Router
 	r := gin.Default()
 
 	// Load HTML templates
@@ -65,9 +70,8 @@ func main() {
 
 	// Register API v1 routes
 	apiV1Group := r.Group("/api/v1")
-	apiv1.RegisterRoutes(apiV1Group, firewallService)
+	apiv1.RegisterRoutes(apiV1Group, firewallService, configService)
 
-	// 6. Start Server
 	port := viper.GetString("server.port")
 	log.Printf("Server starting on port %s", port)
 	if err := r.Run(port); err != nil {

@@ -22,6 +22,7 @@ type CloudProviderConfig struct {
 	SecretId    string `gorm:"type:varchar(255);comment:访问密钥ID" json:"secret_id"`
 	SecretKey   string `gorm:"type:varchar(255);comment:访问密钥Key" json:"secret_key"`
 	Region      string `gorm:"type:varchar(100);comment:区域" json:"region"`
+	InstanceId  string `gorm:"type:varchar(255);comment:实例ID" json:"instance_id"`
 	Extra       string `gorm:"type:text;comment:额外配置(JSON格式)" json:"extra"`
 	IsDefault   bool   `gorm:"default:false;comment:是否为默认配置" json:"is_default"`
 	IsEnabled   bool   `gorm:"default:true;comment:是否启用" json:"is_enabled"`

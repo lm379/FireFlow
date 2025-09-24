@@ -12,18 +12,23 @@ type ConfigRepository interface {
 	GetConfigValue(key string) (string, error)
 	SetConfigValue(key, value, configType, category, description string) error
 	GetConfigsByCategory(category string) ([]model.ConfigItem, error)
-	
+
 	// 云服务商配置
 	GetCloudProviderConfig(provider string) (*model.CloudProviderConfig, error)
+	GetCloudProviderConfigByID(id uint, config *model.CloudProviderConfig) error
 	SetCloudProviderConfig(config *model.CloudProviderConfig) error
 	GetDefaultCloudProvider() (*model.CloudProviderConfig, error)
 	ListCloudProviders() ([]model.CloudProviderConfig, error)
-	
+	UpdateCloudProviderConfig(config *model.CloudProviderConfig) error
+	DeleteCloudProviderConfig(id uint) error
+
 	// 定时任务配置
 	GetCronJobConfig(jobName string) (*model.CronJobConfig, error)
 	SetCronJobConfig(config *model.CronJobConfig) error
 	ListCronJobs() ([]model.CronJobConfig, error)
 	UpdateCronJobStatus(jobName string, isEnabled bool) error
+	UpdateCronJobConfig(config *model.CronJobConfig) error
+	DeleteCronJobConfig(id uint) error
 }
 
 type configRepository struct {
@@ -53,12 +58,12 @@ func (r *configRepository) SetConfigValue(key, value, configType, category, desc
 		Description: description,
 		IsEnabled:   true,
 	}
-	
+
 	result := r.db.Where("config_key = ?", key).FirstOrCreate(&config)
 	if result.Error != nil {
 		return result.Error
 	}
-	
+
 	// 更新值
 	return r.db.Model(&config).Updates(map[string]interface{}{
 		"config_value": value,
@@ -84,17 +89,22 @@ func (r *configRepository) GetCloudProviderConfig(provider string) (*model.Cloud
 	return &config, nil
 }
 
+func (r *configRepository) GetCloudProviderConfigByID(id uint, config *model.CloudProviderConfig) error {
+	result := r.db.First(config, id)
+	return result.Error
+}
+
 func (r *configRepository) SetCloudProviderConfig(config *model.CloudProviderConfig) error {
 	// 如果设置为默认配置，先取消其他默认配置
 	if config.IsDefault {
 		r.db.Model(&model.CloudProviderConfig{}).Where("provider != ?", config.Provider).Update("is_default", false)
 	}
-	
+
 	result := r.db.Where("provider = ?", config.Provider).FirstOrCreate(config)
 	if result.Error != nil {
 		return result.Error
 	}
-	
+
 	// 更新配置
 	return r.db.Model(config).Updates(config).Error
 }
@@ -114,6 +124,18 @@ func (r *configRepository) ListCloudProviders() ([]model.CloudProviderConfig, er
 	return configs, result.Error
 }
 
+func (r *configRepository) UpdateCloudProviderConfig(config *model.CloudProviderConfig) error {
+	// 如果设置为默认配置，先取消其他默认配置
+	if config.IsDefault {
+		r.db.Model(&model.CloudProviderConfig{}).Where("id != ?", config.ID).Update("is_default", false)
+	}
+	return r.db.Save(config).Error
+}
+
+func (r *configRepository) DeleteCloudProviderConfig(id uint) error {
+	return r.db.Delete(&model.CloudProviderConfig{}, id).Error
+}
+
 // 定时任务配置方法
 func (r *configRepository) GetCronJobConfig(jobName string) (*model.CronJobConfig, error) {
 	var config model.CronJobConfig
@@ -129,7 +151,7 @@ func (r *configRepository) SetCronJobConfig(config *model.CronJobConfig) error {
 	if result.Error != nil {
 		return result.Error
 	}
-	
+
 	// 更新配置
 	return r.db.Model(config).Updates(config).Error
 }
@@ -142,6 +164,14 @@ func (r *configRepository) ListCronJobs() ([]model.CronJobConfig, error) {
 
 func (r *configRepository) UpdateCronJobStatus(jobName string, isEnabled bool) error {
 	return r.db.Model(&model.CronJobConfig{}).Where("job_name = ?", jobName).Update("is_enabled", isEnabled).Error
+}
+
+func (r *configRepository) UpdateCronJobConfig(config *model.CronJobConfig) error {
+	return r.db.Save(config).Error
+}
+
+func (r *configRepository) DeleteCronJobConfig(id uint) error {
+	return r.db.Delete(&model.CronJobConfig{}, id).Error
 }
 
 // 辅助方法：将结构体转换为JSON字符串

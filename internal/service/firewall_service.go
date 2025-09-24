@@ -118,6 +118,35 @@ func (s *FirewallService) DeleteRule(id uint) error {
 	return s.repo.Delete(id)
 }
 
+func (s *FirewallService) UpdateRule(rule *model.FirewallRule) error {
+	return s.repo.Update(rule)
+}
+
+func (s *FirewallService) ExecuteRule(id uint) error {
+	// 获取规则
+	rule, err := s.repo.GetByID(id)
+	if err != nil {
+		return fmt.Errorf("failed to get rule: %v", err)
+	}
+
+	// 获取当前公网IP
+	currentIP, err := utils.GetPublicIP()
+	if err != nil {
+		return fmt.Errorf("failed to get current IP: %v", err)
+	}
+
+	// 执行规则更新
+	switch rule.Provider {
+	case "TencentCloud":
+		return s.updateTencentFirewallRule(rule, currentIP)
+	case "Aliyun":
+		// TODO: 实现阿里云规则更新
+		return fmt.Errorf("Aliyun provider not implemented yet")
+	default:
+		return fmt.Errorf("unsupported provider: %s", rule.Provider)
+	}
+}
+
 // CreateTencentFirewallRule creates a new firewall rule in Tencent Cloud and saves it to database
 func (s *FirewallService) CreateTencentFirewallRule(instanceID, port, cidrBlock, protocol, description string) error {
 	if s.tencentClient == nil {

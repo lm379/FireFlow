@@ -24,5 +24,8 @@ Thumbs.db
 # Dependency directories
 vendor/
 
-database.db
+*.db
+pkg/cloud/real_test.go
+fireflow
 
+scripts/
