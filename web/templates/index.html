@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ .title }}</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; background-color: #f4f4f9; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 2em; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        form { display: flex; flex-wrap: wrap; gap: 1em; margin-bottom: 2em; }
+        input, select, button { padding: 0.5em; border-radius: 4px; border: 1px solid #ccc; }
+        button { background-color: #007bff; color: white; cursor: pointer; border: none; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.8em; text-align: left; border-bottom: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>防火墙规则管理</h1>
+
+    <form id="addRuleForm">
+        <input type="text" id="remark" placeholder="备注 (e.g., My Home PC)" required>
+        <select id="provider" required>
+            <option value="TencentCloud">腾讯云</option>
+            <option value="Aliyun">阿里云</option>
+        </select>
+        <input type="text" id="instanceId" placeholder="实例ID" required>
+        <input type="text" id="port" placeholder="端口号" required>
+        <button type="submit">添加规则</button>
+    </form>
+
+    <h2>现有规则</h2>
+    <table id="rulesTable">
+        <thead>
+            <tr>
+                <th>备注</th>
+                <th>云厂商</th>
+                <th>实例ID</th>
+                <th>端口</th>
+                <th>上次更新IP</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            </tbody>
+    </table>
+</div>
+
+<script>
+    const form = document.getElementById('addRuleForm');
+    const tableBody = document.querySelector('#rulesTable tbody');
+
+    async function fetchRules() {
+        const response = await fetch('/api/v1/rules');
+        const rules = await response.json() || [];
+        tableBody.innerHTML = ''; // Clear existing rows
+        rules.forEach(rule => {
+            const row = `
+                <tr>
+                    <td>${rule.remark}</td>
+                    <td>${rule.provider}</td>
+                    <td>${rule.instanceId}</td>
+                    <td>${rule.port}</td>
+                    <td>${rule.lastIp || 'N/A'}</td>
+                    <td><button onclick="deleteRule(${rule.ID})">删除</button></td>
+                </tr>
+            `;
+            tableBody.insertAdjacentHTML('beforeend', row);
+        });
+    }
+
+    async function addRule(event) {
+        event.preventDefault();
+        const rule = {
+            remark: document.getElementById('remark').value,
+            provider: document.getElementById('provider').value,
+            instanceId: document.getElementById('instanceId').value,
+            port: document.getElementById('port').value,
+            enabled: true,
+        };
+
+        await fetch('/api/v1/rules', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(rule),
+        });
+        
+        form.reset();
+        fetchRules();
+    }
+
+    async function deleteRule(id) {
+        if (!confirm('确定要删除这条规则吗?')) return;
+        await fetch(`/api/v1/rules/${id}`, { method: 'DELETE' });
+        fetchRules();
+    }
+
+    form.addEventListener('submit', addRule);
+    document.addEventListener('DOMContentLoaded', fetchRules);
+</script>
+
+</body>
+</html>
