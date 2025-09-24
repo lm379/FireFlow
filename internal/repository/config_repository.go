@@ -97,16 +97,12 @@ func (r *configRepository) GetCloudProviderConfigByID(id uint, config *model.Clo
 func (r *configRepository) SetCloudProviderConfig(config *model.CloudProviderConfig) error {
 	// 如果设置为默认配置，先取消其他默认配置
 	if config.IsDefault {
-		r.db.Model(&model.CloudProviderConfig{}).Where("provider != ?", config.Provider).Update("is_default", false)
+		r.db.Model(&model.CloudProviderConfig{}).Where("provider = ? AND id != ?", config.Provider, config.ID).Update("is_default", false)
 	}
 
-	result := r.db.Where("provider = ?", config.Provider).FirstOrCreate(config)
-	if result.Error != nil {
-		return result.Error
-	}
-
-	// 更新配置
-	return r.db.Model(config).Updates(config).Error
+	// 直接创建新记录，不使用FirstOrCreate
+	result := r.db.Create(config)
+	return result.Error
 }
 
 func (r *configRepository) GetDefaultCloudProvider() (*model.CloudProviderConfig, error) {

@@ -27,5 +27,6 @@ vendor/
 *.db
 pkg/cloud/real_test.go
 fireflow
+*debug*
 
 scripts/

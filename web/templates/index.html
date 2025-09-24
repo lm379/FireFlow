@@ -1,242 +1,256 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ .title }}</title>
     <link rel="stylesheet" href="/static/css/styles.css">
 </head>
+
 <body>
 
-<div class="header">
+    <div class="header">
+        <div class="container">
+            <h1>FireFlow 防火墙管理系统</h1>
+            <p>云服务器安全组规则动态更新</p>
+        </div>
+    </div>
+
     <div class="container">
-        <h1>FireFlow 防火墙管理系统</h1>
-        <p>云服务器安全组规则动态管理平台</p>
-    </div>
-</div>
-
-<div class="container">
-    <!-- 导航标签 -->
-    <div class="nav-tabs">
-        <button class="nav-tab active" onclick="switchTab('rules')">防火墙规则</button>
-        <button class="nav-tab" onclick="switchTab('cloud-config')">云服务配置</button>
-        <button class="nav-tab" onclick="switchTab('system')">系统设置</button>
-    </div>
-
-    <div class="tab-content">
-        <!-- 防火墙规则管理 -->
-        <div id="rules-tab" class="tab-pane active">
-            <h2>防火墙规则管理</h2>
-            
-            <div class="form-section">
-                <h3>添加新规则</h3>
-                <form id="addRuleForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="remark">规则备注</label>
-                            <input type="text" id="remark" placeholder="例如：办公网络访问" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="provider">云服务商</label>
-                            <select id="provider" required>
-                                <option value="">请选择云服务商</option>
-                                <option value="TencentCloud">腾讯云</option>
-                                <option value="Aliyun">阿里云</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="instanceId">实例ID</label>
-                            <input type="text" id="instanceId" placeholder="实例ID或安全组ID" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="port">端口号</label>
-                            <input type="text" id="port" placeholder="端口号或端口范围" required>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="protocol">协议类型</label>
-                            <select id="protocol">
-                                <option value="TCP">TCP</option>
-                                <option value="UDP">UDP</option>
-                                <option value="ALL">全部</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="enabled">启用状态</label>
-                            <select id="enabled">
-                                <option value="true">启用</option>
-                                <option value="false">禁用</option>
-                            </select>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn">添加规则</button>
-                </form>
-            </div>
-
-            <div class="form-section">
-                <h3>规则列表</h3>
-                <table id="rulesTable">
-                    <thead>
-                        <tr>
-                            <th>备注</th>
-                            <th>云服务商</th>
-                            <th>实例ID</th>
-                            <th>端口</th>
-                            <th>协议</th>
-                            <th>当前IP</th>
-                            <th>状态</th>
-                            <th>最后更新</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
+        <!-- 导航标签 -->
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="switchTab('rules')">防火墙规则</button>
+            <button class="nav-tab" onclick="switchTab('cloud-config')">云服务配置</button>
+            <button class="nav-tab" onclick="switchTab('system')">系统设置</button>
         </div>
 
-        <!-- 云服务配置管理 -->
-        <div id="cloud-config-tab" class="tab-pane">
-            <h2>云服务配置管理</h2>
-            
-            <div class="form-section">
-                <h3>添加云服务配置</h3>
-                <form id="addCloudConfigForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="cloud-provider">云服务商</label>
-                            <select id="cloud-provider" required>
-                                <option value="">请选择云服务商</option>
-                                <option value="TencentCloud">腾讯云</option>
-                                <option value="Aliyun">阿里云</option>
-                                <option value="AWS">亚马逊云</option>
-                                <option value="HuaweiCloud">华为云</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="cloud-region">区域</label>
-                            <input type="text" id="cloud-region" placeholder="例如：ap-beijing" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="instance-id">实例ID</label>
-                            <input type="text" id="instance-id" placeholder="云服务器实例ID">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="secret-id">Access Key ID</label>
-                            <input type="text" id="secret-id" placeholder="访问密钥ID" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="secret-key">Access Key Secret</label>
-                            <input type="password" id="secret-key" placeholder="访问密钥Secret" required>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="cloud-description">配置描述</label>
-                        <textarea id="cloud-description" rows="3" placeholder="配置用途描述"></textarea>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="is-default">设为默认配置</label>
-                            <select id="is-default">
-                                <option value="false">否</option>
-                                <option value="true">是</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="cloud-enabled">启用状态</label>
-                            <select id="cloud-enabled">
-                                <option value="true">启用</option>
-                                <option value="false">禁用</option>
-                            </select>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn">保存配置</button>
-                </form>
-            </div>
+        <div class="tab-content">
+            <!-- 防火墙规则管理 -->
+            <div id="rules-tab" class="tab-pane active">
+                <h2>防火墙规则管理</h2>
 
-            <div class="form-section">
-                <h3>已保存的云服务配置</h3>
-                <table id="cloudConfigTable">
-                    <thead>
-                        <tr>
-                            <th>云服务商</th>
-                            <th>区域</th>
-                            <th>实例ID</th>
-                            <th>Access Key ID</th>
-                            <th>描述</th>
-                            <th>默认配置</th>
-                            <th>状态</th>
-                            <th>创建时间</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </div>
+                <div class="form-section">
+                    <h3>添加新规则</h3>
+                    <form id="addRuleForm">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="remark">规则备注 *</label>
+                                <input type="text" id="remark" placeholder="例如：办公网络SSH访问" required>
+                                <small>备注为必填项，用于识别规则</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="cloudConfigId">选择云服务配置 *</label>
+                                <select id="cloudConfigId" required>
+                                    <option value="">请选择已配置的云服务</option>
+                                </select>
+                                <small>请先在云服务配置中添加配置</small>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="port">端口号 *</label>
+                                <input type="text" id="port" placeholder="例如：22, 80, 443, 8000-8080, ALL" required>
+                                <small>支持单个端口或端口范围</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="protocol">协议类型 *</label>
+                                <select id="protocol" required>
+                                    <option value="TCP">TCP</option>
+                                    <option value="UDP">UDP</option>
+                                    <option value="ICMP">ICMP</option>
+                                    <option value="ALL">全部</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="enabled">启用状态</label>
+                                <select id="enabled">
+                                    <option value="true">启用</option>
+                                    <option value="false">禁用</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn">添加规则</button>
+                    </form>
+                </div>
 
-        <!-- 系统设置 -->
-        <div id="system-tab" class="tab-pane">
-            <h2>系统设置</h2>
-            
-            <form id="systemConfigForm">
-                <div class="settings-grid">
-                    <div class="settings-card">
-                        <h4>IP获取设置</h4>
-                        <div class="form-group">
-                            <label for="ip-fetch-url">IP获取服务URL</label>
-                            <input type="url" id="ip-fetch-url" placeholder="https://api.ipify.org">
-                            <small>用于获取当前公网IP地址的API服务</small>
-                        </div>
-                    </div>
-
-                    <div class="settings-card">
-                        <h4>定时任务设置</h4>
-                        <div class="form-group">
-                            <label for="ip-check-interval">IP检查间隔（分钟）</label>
-                            <input type="number" id="ip-check-interval" placeholder="5" min="1" required>
-                            <small>设置多长时间检查一次公网IP变化并更新防火墙规则</small>
-                        </div>
-                        <div class="form-group">
-                            <label for="cron-enabled">启用定时检查</label>
-                            <select id="cron-enabled">
-                                <option value="true">启用</option>
-                                <option value="false">禁用</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-section">
-                            <h5>当前状态</h5>
-                            <p>IP检查间隔: <span id="currentInterval">5分钟</span></p>
-                            <p>状态: <span id="currentStatus" class="status-badge status-enabled">启用</span></p>
-                            <p>下次检查时间: <span id="nextCheck">计算中...</span></p>
-                        </div>
+                <div class="form-section">
+                    <h3>规则列表</h3>
+                    <div class="table-wrapper">
+                        <table id="rulesTable">
+                            <thead>
+                                <tr>
+                                    <th class="actions-column">操作</th>
+                                    <th>备注</th>
+                                    <th>云服务商</th>
+                                    <th>实例ID</th>
+                                    <th>端口</th>
+                                    <th>协议</th>
+                                    <th>当前IP</th>
+                                    <th>状态</th>
+                                    <th>最后更新</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
                     </div>
                 </div>
-                
-                <div style="text-align: center; margin-top: 30px;">
-                    <button type="submit" class="btn">保存所有设置</button>
+            </div>
+
+            <!-- 云服务配置管理 -->
+            <div id="cloud-config-tab" class="tab-pane">
+                <h2>云服务配置管理</h2>
+
+                <div class="form-section">
+                    <h3>添加云服务配置</h3>
+                    <form id="addCloudConfigForm">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cloud-provider">云服务商</label>
+                                <select id="cloud-provider" required>
+                                    <option value="">请选择云服务商</option>
+                                    <option value="TencentCloud">腾讯云</option>
+                                    <option value="Aliyun">阿里云</option>
+                                    <option value="AWS">亚马逊云</option>
+                                    <option value="HuaweiCloud">华为云</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="cloud-region">区域</label>
+                                <input type="text" id="cloud-region" placeholder="例如：ap-beijing" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="instance-id">实例ID</label>
+                                <input type="text" id="instance-id" placeholder="云服务器实例ID">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="secret-id">Access Key ID</label>
+                                <input type="text" id="secret-id" placeholder="访问密钥ID" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="secret-key">Access Key Secret</label>
+                                <input type="password" id="secret-key" placeholder="访问密钥Secret" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cloud-description">配置描述</label>
+                            <textarea id="cloud-description" rows="3" placeholder="配置用途描述"></textarea>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="is-default">设为默认配置</label>
+                                <select id="is-default">
+                                    <option value="false">否</option>
+                                    <option value="true">是</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="cloud-enabled">启用状态</label>
+                                <select id="cloud-enabled">
+                                    <option value="true">启用</option>
+                                    <option value="false">禁用</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn">保存配置</button>
+                    </form>
                 </div>
-            </form>
+
+                <div class="form-section">
+                    <h3>已保存的云服务配置</h3>
+                    <div class="table-wrapper">
+                        <table id="cloudConfigTable">
+                            <thead>
+                                <tr>
+                                    <th class="actions-column">操作</th>
+                                    <th>云服务商</th>
+                                    <th>区域</th>
+                                    <th>实例ID</th>
+                                    <th>Access Key ID</th>
+                                    <th>描述</th>
+                                    <th>默认配置</th>
+                                    <th>状态</th>
+                                    <th>创建时间</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 系统设置 -->
+            <div id="system-tab" class="tab-pane">
+                <h2>系统设置</h2>
+
+                <form id="systemConfigForm">
+                    <div class="settings-grid">
+                        <div class="settings-card">
+                            <h4>IP获取设置</h4>
+                            <div class="form-group">
+                                <label for="ip-fetch-url">IP获取服务URL</label>
+                                <input type="url" id="ip-fetch-url" placeholder="https://api.ipify.org">
+                                <small>用于获取当前公网IP地址的API服务</small>
+                                <small>建议要求API必须直接返回IP的值，且api必须仅返回IPv4地址
+                                    <br>
+                                    例如：https://4.ipw.cn 或者 https://api-ipv4.ip.sb/ip
+                                </small>
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <h4>定时任务设置</h4>
+                            <div class="form-group">
+                                <label for="ip-check-interval">IP检查间隔（分钟）</label>
+                                <input type="number" id="ip-check-interval" placeholder="5" min="1" required>
+                                <small>设置多长时间检查一次公网IP变化并更新防火墙规则</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="cron-enabled">启用定时检查</label>
+                                <select id="cron-enabled">
+                                    <option value="true">启用</option>
+                                    <option value="false">禁用</option>
+                                </select>
+                            </div>
+
+                            <div class="form-section">
+                                <h5>当前状态</h5>
+                                <p>IP检查间隔: <span id="currentInterval">30分钟</span></p>
+                                <p>定时任务状态: <span id="currentStatus" class="status-badge status-disabled">禁用</span></p>
+                                <p>下次检查时间: <span id="nextCheck">已禁用</span></p>
+                                <p>当前公网IP: <span id="currentIP">获取中...</span></p>
+                                <div style="margin-top: 15px;">
+                                    <button type="button" class="btn btn-secondary"
+                                        onclick="syncIPNow()">立即获取并同步IP</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <button type="submit" class="btn">保存所有设置</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
-</div>
 
-<!-- 编辑模态框 -->
-<div id="editModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3 id="modal-title">编辑</h3>
-            <span class="close" onclick="closeModal()">&times;</span>
+    <!-- 编辑模态框 -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">编辑</h3>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div id="modal-body"></div>
         </div>
-        <div id="modal-body"></div>
     </div>
-</div>
 
-<script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js"></script>
 </body>
+
 </html>

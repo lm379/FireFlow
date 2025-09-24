@@ -1,38 +1,74 @@
 package core
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/robfig/cron/v3"
-	"github.com/spf13/viper"
 )
 
 // CronManager 管理定时任务
 type CronManager struct {
-	cron *cron.Cron
+	cron          *cron.Cron
+	firewallJobID cron.EntryID
+	updateFunc    func()
+	isRunning     bool
 }
 
 // NewCronManager 创建新的定时任务管理器
 func NewCronManager() *CronManager {
 	return &CronManager{
-		cron: cron.New(),
+		cron:          cron.New(cron.WithSeconds()), // 支持包含秒的6字段格式
+		firewallJobID: 0,
+		isRunning:     false,
 	}
 }
 
-// AddFirewallUpdateJob 添加防火墙更新任务
-func (cm *CronManager) AddFirewallUpdateJob(updateFunc func()) error {
-	cronExpr := viper.GetString("cron.schedule")
-	if cronExpr == "" {
-		cronExpr = "0 */5 * * * *" // 默认每5分钟执行一次
+// SetUpdateFunc 设置更新函数
+func (cm *CronManager) SetUpdateFunc(updateFunc func()) {
+	cm.updateFunc = updateFunc
+}
+
+// StartFirewallUpdateJob 根据配置启动防火墙更新任务
+func (cm *CronManager) StartFirewallUpdateJob(intervalMinutes int) error {
+	if cm.updateFunc == nil {
+		return fmt.Errorf("update function not set")
 	}
 
-	_, err := cm.cron.AddFunc(cronExpr, updateFunc)
+	// 如果已经有任务在运行，先停止
+	if cm.firewallJobID != 0 {
+		cm.cron.Remove(cm.firewallJobID)
+		cm.firewallJobID = 0
+	}
+
+	// 创建cron表达式：每N分钟执行一次
+	cronExpr := fmt.Sprintf("0 */%d * * * *", intervalMinutes)
+
+	// 添加新任务
+	jobID, err := cm.cron.AddFunc(cronExpr, cm.updateFunc)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("Firewall update job scheduled with expression: %s", cronExpr)
+	cm.firewallJobID = jobID
+	cm.isRunning = true
+	log.Printf("Firewall update job scheduled with expression: %s (every %d minutes)", cronExpr, intervalMinutes)
 	return nil
+}
+
+// StopFirewallUpdateJob 停止防火墙更新任务
+func (cm *CronManager) StopFirewallUpdateJob() {
+	if cm.firewallJobID != 0 {
+		cm.cron.Remove(cm.firewallJobID)
+		cm.firewallJobID = 0
+		cm.isRunning = false
+		log.Println("Firewall update job stopped")
+	}
+}
+
+// IsRunning 检查防火墙更新任务是否正在运行
+func (cm *CronManager) IsRunning() bool {
+	return cm.isRunning
 }
 
 // Start 启动定时任务

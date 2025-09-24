@@ -42,17 +42,15 @@ func main() {
 	configRepo := repository.NewConfigRepository(db)
 
 	// Initialize services
-	firewallService := service.NewFirewallService(firewallRepo)
 	configService := service.NewConfigService(configRepo)
+	firewallService := service.NewFirewallService(firewallRepo, configService)
 
+	// 初始化定时任务管理器，但不自动启动任务
 	cronManager := core.NewCronManager()
-	err = cronManager.AddFirewallUpdateJob(func() {
+	cronManager.SetUpdateFunc(func() {
 		firewallService.UpdateAllRules()
 	})
-	if err != nil {
-		log.Fatalf("Failed to add firewall update job: %v", err)
-	}
-	cronManager.Start()
+	cronManager.Start() // 只启动cron引擎，不添加具体任务
 
 	r := gin.Default()
 
@@ -70,7 +68,7 @@ func main() {
 
 	// Register API v1 routes
 	apiV1Group := r.Group("/api/v1")
-	apiv1.RegisterRoutes(apiV1Group, firewallService, configService)
+	apiv1.RegisterRoutes(apiV1Group, firewallService, configService, cronManager)
 
 	port := viper.GetString("server.port")
 	log.Printf("Server starting on port %s", port)

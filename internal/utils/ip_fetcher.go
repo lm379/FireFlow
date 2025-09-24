@@ -8,7 +8,16 @@ import (
 
 // GetPublicIP fetches the public IP from an external service.
 func GetPublicIP() (string, error) {
-	resp, err := http.Get("https://4.ipw.cn")
+	return GetPublicIPWithURL("https://4.ipw.cn")
+}
+
+// GetPublicIPWithURL fetches the public IP from a specified URL.
+func GetPublicIPWithURL(url string) (string, error) {
+	if url == "" {
+		url = "https://4.ipw.cn" // 默认URL
+	}
+
+	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
 	}

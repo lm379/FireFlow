@@ -1,15 +1,18 @@
 package v1
 
 import (
+	"FireFlow/internal/core"
 	"FireFlow/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // RegisterRoutes registers all v1 API routes.
-func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallService, configService service.ConfigService) {
+func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallService, configService service.ConfigService, cronManager *core.CronManager) {
 	firewallHandler := NewFirewallHandler(firewallService)
-	configHandler := NewConfigHandler(configService)
+	firewallHandler.SetConfigService(configService) // 设置配置服务
+	configHandler := NewConfigHandler(configService, cronManager)
+	configHandler.SetFirewallService(firewallService) // 设置防火墙服务
 	cloudConfigHandler := NewCloudConfigHandler(configService)
 	cronJobHandler := NewCronJobHandler(configService)
 
@@ -57,4 +60,8 @@ func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallSe
 		systemRoutes.GET("/", configHandler.GetSystemConfig)
 		systemRoutes.PUT("/", configHandler.SetSystemConfig)
 	}
+
+	// IP同步路由
+	router.POST("/sync-ip/", configHandler.SyncIPNow)
+	router.GET("/current-ip/", configHandler.GetCurrentIP)
 }

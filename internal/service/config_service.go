@@ -3,6 +3,7 @@ package service
 import (
 	"FireFlow/internal/model"
 	"FireFlow/internal/repository"
+	"FireFlow/pkg/cloud"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -26,6 +27,7 @@ type ConfigService interface {
 
 	// 云服务商配置管理
 	GetCloudConfig(provider string) (*model.CloudProviderConfig, error)
+	GetCloudConfigByID(id uint) (*model.CloudProviderConfig, error)
 	SetCloudConfig(config *model.CloudProviderConfig) error
 	GetDefaultCloudConfig() (*model.CloudProviderConfig, error)
 	ListCloudConfigs() ([]model.CloudProviderConfig, error)
@@ -100,6 +102,15 @@ func (s *configService) GetCloudConfig(provider string) (*model.CloudProviderCon
 	return s.configRepo.GetCloudProviderConfig(provider)
 }
 
+func (s *configService) GetCloudConfigByID(id uint) (*model.CloudProviderConfig, error) {
+	var config model.CloudProviderConfig
+	err := s.configRepo.GetCloudProviderConfigByID(id, &config)
+	if err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
+
 func (s *configService) SetCloudConfig(config *model.CloudProviderConfig) error {
 	return s.configRepo.SetCloudProviderConfig(config)
 }
@@ -164,13 +175,49 @@ func (s *configService) TestCloudConfig(id uint) (*CloudTestResult, error) {
 }
 
 func (s *configService) testTencentInstance(config *model.CloudProviderConfig) (*CloudTestResult, error) {
-	// TODO: 调用腾讯云API检查实例
-	// 这里暂时返回模拟数据
+	// 创建腾讯云客户端配置
+	tencentConfig := cloud.TencentConfig{
+		SecretId:   config.SecretId,
+		SecretKey:  config.SecretKey,
+		Region:     config.Region,
+		InstanceId: config.InstanceId,
+	}
+
+	// 创建腾讯云客户端
+	client, err := cloud.NewTencentClient(tencentConfig)
+	if err != nil {
+		return &CloudTestResult{
+			Success: false,
+			Message: fmt.Sprintf("创建腾讯云客户端失败: %v", err),
+		}, err
+	}
+
+	// 如果没有实例ID，只测试凭证连接
+	if config.InstanceId == "" {
+		return &CloudTestResult{
+			Success:        true,
+			Message:        "腾讯云凭证验证成功，但未配置实例ID",
+			InstanceExists: false,
+		}, nil
+	}
+
+	// 获取实例信息
+	instanceInfo, err := client.GetInstance(config.InstanceId)
+	if err != nil {
+		return &CloudTestResult{
+			Success:        false,
+			Message:        fmt.Sprintf("获取实例信息失败: %v", err),
+			InstanceExists: false,
+		}, err
+	}
+
+	// 成功获取实例信息
+	message := fmt.Sprintf("实例检查成功，实例名称: %s，状态: %s", instanceInfo.InstanceName, instanceInfo.Status)
 	return &CloudTestResult{
 		Success:        true,
-		Message:        "实例检查成功",
+		Message:        message,
 		InstanceExists: true,
-		InstanceIP:     "1.2.3.4", // 这里应该是实际获取的IP
+		InstanceIP:     instanceInfo.PublicIP,
 	}, nil
 }
 

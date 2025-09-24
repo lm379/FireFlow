@@ -2,4 +2,4 @@ server:
   port: ":9686"
 
 database:
-  path: "database.db"  # SQLite数据库文件
+  path: "data/database.db"  # SQLite数据库文件

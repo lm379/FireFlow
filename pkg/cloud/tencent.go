@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"crypto/md5"
 	"fmt"
 	"log"
 	"strings"
@@ -36,8 +37,8 @@ type CloudProvider interface {
 	// 删除防火墙规则
 	DeleteFirewallRule(instanceID, ruleID string) error
 
-	// 更新防火墙规则
-	UpdateFirewallRule(instanceID, ruleID string, newIP string) error
+	// 更新防火墙规则 - 通过规则规格匹配，返回更新后的规则信息
+	UpdateFirewallRule(instanceID, ruleID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error)
 
 	// 获取防火墙规则列表
 	ListFirewallRules(instanceID string) ([]*FirewallRuleResult, error)
@@ -151,12 +152,12 @@ func (tc *TencentClient) DeleteFirewallRule(instanceID, ruleID string) error {
 	}
 }
 
-func (tc *TencentClient) UpdateFirewallRule(instanceID, ruleID string, newIP string) error {
+func (tc *TencentClient) UpdateFirewallRule(instanceID, ruleID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error) {
 	if tc.isCVMInstance(instanceID) {
-		return fmt.Errorf("CVM firewall rule management not implemented yet")
-		// return tc.updateCVMFirewallRule(instanceID, ruleID, newIP)
+		return nil, fmt.Errorf("CVM firewall rule management not implemented yet")
+		// return tc.updateCVMFirewallRule(instanceID, ruleID, ruleSpec, newIP)
 	} else {
-		return tc.updateLighthouseFirewallRule(instanceID, ruleID, newIP)
+		return tc.updateLighthouseFirewallRule(instanceID, ruleID, ruleSpec, newIP)
 	}
 }
 
@@ -288,7 +289,7 @@ func (tc *TencentClient) createLighthouseFirewallRule(instanceID string, rule *F
 
 	request.FirewallRules = []*lighthouse.FirewallRule{firewallRule}
 
-	response, err := tc.lighthouseClient.CreateFirewallRules(request)
+	_, err := tc.lighthouseClient.CreateFirewallRules(request)
 	if err != nil {
 		if sdkError, ok := err.(*errors.TencentCloudSDKError); ok {
 			return nil, fmt.Errorf("TencentCloud API Error: Code=%s, Message=%s",
@@ -297,8 +298,16 @@ func (tc *TencentClient) createLighthouseFirewallRule(instanceID string, rule *F
 		return nil, fmt.Errorf("failed to create Lighthouse firewall rule: %v", err)
 	}
 
+	// 使用与列表规则相同的哈希算法生成规则ID
+	ruleContent := fmt.Sprintf("%s-%s-%s-%s",
+		strings.ToUpper(rule.Protocol),
+		rule.Port,
+		rule.CidrBlock,
+		strings.ToUpper(rule.Action))
+	ruleID := fmt.Sprintf("lh-%x", md5.Sum([]byte(ruleContent)))
+
 	result := &FirewallRuleResult{
-		RuleID:      *response.Response.RequestId, // 使用RequestId作为规则ID
+		RuleID:      ruleID,
 		Port:        rule.Port,
 		Protocol:    rule.Protocol,
 		CidrBlock:   rule.CidrBlock,
@@ -334,11 +343,96 @@ func (tc *TencentClient) deleteLighthouseFirewallRule(instanceID, ruleID string)
 	return nil
 }
 
-func (tc *TencentClient) updateLighthouseFirewallRule(instanceID, ruleID string, newIP string) error {
-	// Lighthouse API 不支持直接更新规则，需要先删除再创建
-	log.Printf("Updating Lighthouse firewall rule %s for instance %s with new IP %s", ruleID, instanceID, newIP)
-	// 这里需要先获取原规则信息，删除原规则，然后用新IP创建规则
-	return fmt.Errorf("updateLighthouseFirewallRule not implemented yet")
+// 根据规则规格删除防火墙规则
+func (tc *TencentClient) deleteLighthouseFirewallRuleBySpec(instanceID string, rule *FirewallRuleResult) error {
+	request := lighthouse.NewDeleteFirewallRulesRequest()
+	request.InstanceId = common.StringPtr(instanceID)
+
+	// 构建要删除的规则
+	firewallRule := &lighthouse.FirewallRule{
+		Protocol:                common.StringPtr(rule.Protocol),
+		Port:                    common.StringPtr(rule.Port),
+		CidrBlock:               common.StringPtr(rule.CidrBlock),
+		Action:                  common.StringPtr(rule.Action),
+		FirewallRuleDescription: common.StringPtr(rule.Description),
+	}
+
+	request.FirewallRules = []*lighthouse.FirewallRule{firewallRule}
+
+	_, err := tc.lighthouseClient.DeleteFirewallRules(request)
+	if err != nil {
+		if sdkError, ok := err.(*errors.TencentCloudSDKError); ok {
+			return fmt.Errorf("TencentCloud API Error: Code=%s, Message=%s",
+				sdkError.Code, sdkError.Message)
+		}
+		return fmt.Errorf("failed to delete Lighthouse firewall rule: %v", err)
+	}
+
+	log.Printf("Deleted Lighthouse firewall rule (proto:%s, port:%s, cidr:%s) for instance %s",
+		rule.Protocol, rule.Port, rule.CidrBlock, instanceID)
+	return nil
+}
+
+func (tc *TencentClient) updateLighthouseFirewallRule(instanceID, ruleID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error) {
+	log.Printf("Updating Lighthouse firewall rule for instance %s with new IP %s", instanceID, newIP)
+	log.Printf("Rule spec: Protocol=%s, Port=%s, Description=%s", ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
+
+	// 获取所有现有规则
+	rules, err := tc.listLighthouseFirewallRules(instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing rules: %v", err)
+	}
+
+	// 通过备注、协议、端口匹配规则，而不是依赖RuleID
+	var targetRule *FirewallRuleResult
+	for _, rule := range rules {
+		if rule.Protocol == strings.ToUpper(ruleSpec.Protocol) &&
+			rule.Port == ruleSpec.Port &&
+			rule.Description == ruleSpec.Description {
+			targetRule = rule
+			log.Printf("Found matching rule by spec: RuleID=%s, CidrBlock=%s", rule.RuleID, rule.CidrBlock)
+			break
+		}
+	}
+
+	if targetRule == nil {
+		log.Printf("No matching rule found for Protocol=%s, Port=%s, Description=%s",
+			ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
+		return nil, fmt.Errorf("rule not found with protocol=%s, port=%s, description=%s",
+			ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
+	}
+
+	// 构建新的CIDR块
+	newCidrBlock := fmt.Sprintf("%s/32", newIP) // 如果IP已经是最新的，就不需要更新
+	if targetRule.CidrBlock == newCidrBlock {
+		log.Printf("Rule %s already has the correct IP %s", ruleID, newIP)
+		return targetRule, nil
+	}
+
+	// 删除旧规则并创建新规则（Lighthouse不支持直接更新）
+	// 首先创建新规则
+	newRuleSpec := &FirewallRuleSpec{
+		Protocol:    targetRule.Protocol,
+		Port:        targetRule.Port,
+		CidrBlock:   newCidrBlock,
+		Action:      targetRule.Action,
+		Description: targetRule.Description,
+	}
+
+	newRule, err := tc.createLighthouseFirewallRule(instanceID, newRuleSpec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create new rule: %v", err)
+	}
+
+	// 删除旧规则
+	err = tc.deleteLighthouseFirewallRuleBySpec(instanceID, targetRule)
+	if err != nil {
+		log.Printf("Warning: Created new rule but failed to delete old rule: %v", err)
+		// 不返回错误，因为新规则已经创建成功
+	}
+
+	log.Printf("Successfully updated Lighthouse firewall rule for instance %s", instanceID)
+	return newRule, nil
 }
 
 func (tc *TencentClient) listLighthouseFirewallRules(instanceID string) ([]*FirewallRuleResult, error) {
@@ -355,9 +449,13 @@ func (tc *TencentClient) listLighthouseFirewallRules(instanceID string) ([]*Fire
 	}
 
 	var results []*FirewallRuleResult
-	for i, rule := range response.Response.FirewallRuleSet {
+	for _, rule := range response.Response.FirewallRuleSet {
+		// 使用规则内容生成稳定的ID
+		ruleContent := fmt.Sprintf("%s-%s-%s-%s", *rule.Protocol, *rule.Port, *rule.CidrBlock, *rule.Action)
+		ruleID := fmt.Sprintf("lh-%x", md5.Sum([]byte(ruleContent)))
+
 		result := &FirewallRuleResult{
-			RuleID:      fmt.Sprintf("lighthouse-rule-%d", i), // 使用索引作为规则ID
+			RuleID:      ruleID,
 			Port:        *rule.Port,
 			Protocol:    *rule.Protocol,
 			CidrBlock:   *rule.CidrBlock,
