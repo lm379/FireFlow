@@ -10,11 +10,80 @@ jobs:
           - name: Checkout code
             uses: actions/checkout@v4
 
+          - name: Build multi-arch binaries with xgo
+            run: |
+              # 使用 xgo 构建多架构二进制文件
+              docker run --rm \
+                -v $PWD:/build \
+                crazymax/xgo:latest \
+                -out fireflow \
+                -ldflags="-s -w" \
+                -targets="linux/amd64,linux/arm64,linux/arm-7" \
+                ./cmd/server
+              
+              # 检查生成的文件
+              ls -la fireflow-*
+              
+              # 重命名生成的文件以便 Dockerfile 使用
+              [ -f fireflow-linux-amd64 ] && mv fireflow-linux-amd64 fireflow-amd64
+              [ -f fireflow-linux-arm64 ] && mv fireflow-linux-arm64 fireflow-arm64  
+              [ -f fireflow-linux-arm-7 ] && mv fireflow-linux-arm-7 fireflow-armv7
+
           - name: Set up QEMU
             uses: docker/setup-qemu-action@v3
 
           - name: Set up Docker Buildx
             uses: docker/setup-buildx-action@v3
+
+          - name: Create multi-stage Dockerfile
+            run: |
+              cat > Dockerfile.multiarch << 'EOF'
+              FROM --platform=$BUILDPLATFORM alpine:latest AS builder
+              ARG TARGETPLATFORM
+              WORKDIR /app
+              
+              # 复制对应架构的二进制文件
+              COPY fireflow-* ./
+              RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+                    cp fireflow-amd64 fireflow 2>/dev/null || echo "amd64 binary not found"; \
+                  elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+                    cp fireflow-arm64 fireflow 2>/dev/null || echo "arm64 binary not found"; \
+                  elif [ "$TARGETPLATFORM" = "linux/arm/v7" ]; then \
+                    cp fireflow-armv7 fireflow 2>/dev/null || echo "armv7 binary not found"; \
+                  fi && \
+                  chmod +x fireflow || echo "No fireflow binary found"
+
+              FROM alpine:latest
+              
+              # 添加运行时依赖
+              RUN apk add --no-cache ca-certificates tzdata sqlite-libs && \
+                  mkdir -p /app/data /app/configs && \
+                  addgroup -g 1000 fireflow && \
+                  adduser -u 1000 -G fireflow -s /bin/sh -D fireflow
+
+              WORKDIR /app
+
+              # 设置生产环境变量
+              ENV ENV=production
+              ENV GIN_MODE=release
+              ENV TZ=Asia/Shanghai
+
+              # 复制二进制文件和配置
+              COPY --from=builder /app/fireflow .
+              COPY configs/config.yaml /app/configs/
+
+              # 设置正确的权限
+              RUN chown -R fireflow:fireflow /app
+              USER fireflow
+
+              # 健康检查
+              HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+                  CMD wget --no-verbose --tries=1 --spider http://localhost:9686/ || exit 1
+
+              EXPOSE 9686
+
+              CMD ["./fireflow"]
+              EOF
 
           - name: Log in to Docker Hub
             uses: docker/login-action@v3
@@ -28,7 +97,7 @@ jobs:
               context: .
               push: true
               tags: ${{ secrets.DOCKER_USERNAME }}/fireflow:latest,${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}
-              platforms: linux/amd64,linux/arm64
-              file: ./Dockerfile
+              platforms: linux/amd64,linux/arm64,linux/arm/v7
+              file: ./Dockerfile.multiarch
               cache-from: type=gha
               cache-to: type=gha,mode=max

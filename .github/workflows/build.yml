@@ -16,10 +16,10 @@ jobs:
             goarch: amd64
             cgo: 1
             cc: gcc
-          # - goos: linux
-          #   goarch: arm64
-          #   cgo: 1
-          #   cc: aarch64-linux-gnu-gcc
+          - goos: linux
+            goarch: arm64
+            cgo: 1
+            cc: aarch64-linux-gnu-gcc
           # - goos: linux
           #   goarch: arm
           #   goarm: 7
@@ -120,6 +120,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
