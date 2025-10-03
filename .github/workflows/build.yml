@@ -16,15 +16,15 @@ jobs:
             goarch: amd64
             cgo: 1
             cc: gcc
-          - goos: linux
-            goarch: arm64
-            cgo: 1
-            cc: aarch64-linux-gnu-gcc
-          - goos: linux
-            goarch: arm
-            goarm: 7
-            cgo: 1
-            cc: arm-linux-gnueabihf-gcc
+          # - goos: linux
+          #   goarch: arm64
+          #   cgo: 1
+          #   cc: aarch64-linux-gnu-gcc
+          # - goos: linux
+          #   goarch: arm
+          #   goarm: 7
+          #   cgo: 1
+          #   cc: arm-linux-gnueabihf-gcc
           # Windows builds
           - goos: windows
             goarch: amd64
@@ -55,7 +55,21 @@ jobs:
         if: matrix.cgo == 1
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib gcc-mingw-w64 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+          
+          # Install dependencies based on target architecture to avoid conflicts
+          if [[ "${{ matrix.goarch }}" == "amd64" && "${{ matrix.goos }}" == "linux" ]]; then
+            # For Linux AMD64, we can use the default gcc
+            sudo apt-get install -y build-essential
+          elif [[ "${{ matrix.goarch }}" == "arm64" && "${{ matrix.goos }}" == "linux" ]]; then
+            # For Linux ARM64
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          elif [[ "${{ matrix.goarch }}" == "arm" && "${{ matrix.goos }}" == "linux" ]]; then
+            # For Linux ARM v7
+            sudo apt-get install -y gcc-arm-linux-gnueabihf
+          elif [[ "${{ matrix.goos }}" == "windows" ]]; then
+            # For Windows cross-compilation
+            sudo apt-get install -y gcc-mingw-w64
+          fi
 
       - name: Get dependencies
         run: go mod download
@@ -65,7 +79,6 @@ jobs:
           CGO_ENABLED: ${{ matrix.cgo }}
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          GOARM: ${{ matrix.goarm }}
           CC: ${{ matrix.cc }}
         run: |
           # Determine file extension
@@ -75,13 +88,8 @@ jobs:
           fi
           
           # Build output filename
-          if [[ -n "${{ matrix.goarm }}" ]]; then
-            output="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}v${{ matrix.goarm }}${ext}"
-            archive="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}v${{ matrix.goarm }}.tar.gz"
-          else
-            output="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
-            archive="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
-          fi
+          output="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
+          archive="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
           
           # Build the binary with optimizations
           echo "Building ${output} for ${{ matrix.goos }}/${{ matrix.goarch }}..."
@@ -106,7 +114,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: fireflow-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
+          name: fireflow-${{ matrix.goos }}-${{ matrix.goarch }}
           path: fireflow-*.tar.gz
 
   release:
