@@ -1,0 +1,35 @@
+# Ignore Go build artifacts
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+fireflow
+
+# Ignore dependency directories
+vendor/
+node_modules/
+
+# Ignore editor and OS files
+*.log
+*.swp
+*.swo
+*.tmp
+*.bak
+.DS_Store
+.idea/
+.vscode/
+.env
+
+# Ignore Docker files
+Dockerfile
+docker-compose.yml
+
+# Ignore CI/CD configuration files
+.github/
+.git
+.cnb.*
+
+# Ignore sqlite database files
+*.db

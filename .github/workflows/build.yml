@@ -1,0 +1,135 @@
+name: Build binary and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          # Linux builds with CGO
+          - goos: linux
+            goarch: amd64
+            cgo: 1
+            cc: gcc
+          - goos: linux
+            goarch: arm64
+            cgo: 1
+            cc: aarch64-linux-gnu-gcc
+          - goos: linux
+            goarch: arm
+            goarm: 7
+            cgo: 1
+            cc: arm-linux-gnueabihf-gcc
+          # Windows builds
+          - goos: windows
+            goarch: amd64
+            cgo: 1
+            cc: x86_64-w64-mingw32-gcc
+          - goos: windows
+            goarch: arm64
+            cgo: 0  # Windows ARM64 CGO support is limited
+          # macOS builds (cross-compilation from Linux usually requires CGO=0)
+          - goos: darwin
+            goarch: amd64
+            cgo: 0
+          - goos: darwin
+            goarch: arm64
+            cgo: 0
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install cross-compilation dependencies
+        if: matrix.cgo == 1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib gcc-mingw-w64 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+
+      - name: Get dependencies
+        run: go mod download
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: ${{ matrix.cgo }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CC: ${{ matrix.cc }}
+        run: |
+          # Determine file extension
+          ext=""
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            ext=".exe"
+          fi
+          
+          # Build output filename
+          if [[ -n "${{ matrix.goarm }}" ]]; then
+            output="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}v${{ matrix.goarm }}${ext}"
+            archive="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}v${{ matrix.goarm }}.tar.gz"
+          else
+            output="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
+            archive="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+          fi
+          
+          # Build the binary with optimizations
+          echo "Building ${output} for ${{ matrix.goos }}/${{ matrix.goarch }}..."
+          go build \
+            -ldflags="-s -w -X main.version=${GITHUB_REF#refs/tags/} -X main.buildTime=$(date -u '+%Y-%m-%d_%H:%M:%S_UTC') -X main.goVersion=$(go version | cut -d' ' -f3)" \
+            -trimpath \
+            -o "${output}" \
+            ./cmd/server
+          
+          # Verify the binary was created
+          if [[ ! -f "${output}" ]]; then
+            echo "Error: Binary ${output} was not created"
+            exit 1
+          fi
+          
+          # Create tarball
+          tar -czf "${archive}" "${output}"
+          
+          echo "✅ Built: ${output} ($(du -h "${output}" | cut -f1))"
+          echo "✅ Archive: ${archive} ($(du -h "${archive}" | cut -f1))"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fireflow-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
+          path: fireflow-*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: List files
+        run: |
+          echo "Files to be released:"
+          ls -la fireflow-*.tar.gz
+          echo ""
+          echo "File sizes:"
+          du -h fireflow-*.tar.gz
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: fireflow-*.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

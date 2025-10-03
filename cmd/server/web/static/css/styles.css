@@ -206,6 +206,11 @@ textarea:focus {
     background: #545b62;
 }
 
+/* 取消编辑按钮样式 */
+.cancel-edit-btn {
+    margin-left: 10px;
+}
+
 .btn-danger {
     background: #dc3545;
     color: white;

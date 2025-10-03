@@ -6,8 +6,12 @@ import (
 	"FireFlow/internal/model"
 	"FireFlow/internal/repository"
 	"FireFlow/internal/service"
+	"embed"
+	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
@@ -15,7 +19,40 @@ import (
 	"gorm.io/gorm"
 )
 
+//go:embed web/templates/*
+var templateFS embed.FS
+
+//go:embed web/static
+var staticFS embed.FS
+
+// setupWebAssets 设置嵌入的模板和静态文件
+func setupWebAssets(r *gin.Engine) {
+	// 加载嵌入的模板
+	tmpl, err := template.ParseFS(templateFS, "web/templates/*")
+	if err != nil {
+		log.Fatalf("Failed to parse embedded templates: %v", err)
+	}
+	r.SetHTMLTemplate(tmpl)
+
+	// 设置嵌入的静态文件
+	staticSubFS, err := fs.Sub(staticFS, "web/static")
+	if err != nil {
+		log.Fatalf("Failed to create static sub filesystem: %v", err)
+	}
+	r.StaticFS("/static", http.FS(staticSubFS))
+}
+
 func main() {
+	// 设置 Gin 模式
+	if os.Getenv("GIN_MODE") == "" {
+		// 如果没有设置环境变量，根据是否为生产环境自动设置
+		if os.Getenv("ENV") == "production" {
+			gin.SetMode(gin.ReleaseMode)
+		} else {
+			gin.SetMode(gin.DebugMode)
+		}
+	}
+
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("./configs")
@@ -54,10 +91,8 @@ func main() {
 
 	r := gin.Default()
 
-	// Load HTML templates
-	r.LoadHTMLGlob("web/templates/*")
-	// Serve static files
-	r.Static("/static", "./web/static")
+	// Setup web assets (templates and static files)
+	setupWebAssets(r)
 
 	// Base URL for the frontend
 	r.GET("/", func(c *gin.Context) {

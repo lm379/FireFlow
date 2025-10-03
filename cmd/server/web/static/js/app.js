@@ -16,7 +16,7 @@ function getProviderDisplayName(provider) {
 }
 
 // 标签页切换
-function switchTab(tabName) {
+function switchTab(tabName, targetElement = null) {
     // 隐藏所有标签页
     document.querySelectorAll('.tab-pane').forEach(tab => {
         tab.classList.remove('active');
@@ -27,7 +27,23 @@ function switchTab(tabName) {
 
     // 显示选中的标签页
     document.getElementById(`${tabName}-tab`).classList.add('active');
-    event.target.classList.add('active');
+    
+    // 激活对应的导航标签
+    if (targetElement) {
+        targetElement.classList.add('active');
+    } else {
+        // 如果没有传递目标元素，查找对应的标签按钮
+        const navButtons = document.querySelectorAll('.nav-tab');
+        navButtons.forEach(button => {
+            if (button.textContent.includes('云服务配置') && tabName === 'cloud-config') {
+                button.classList.add('active');
+            } else if (button.textContent.includes('防火墙规则') && tabName === 'rules') {
+                button.classList.add('active');
+            } else if (button.textContent.includes('系统设置') && tabName === 'system') {
+                button.classList.add('active');
+            }
+        });
+    }
 
     // 加载对应数据
     switch(tabName) {
@@ -226,21 +242,58 @@ async function addRule(event) {
             enabled: document.getElementById('enabled').value === 'true',
         };
 
-        await apiRequest('/api/v1/rules/', {
-            method: 'POST',
-            body: JSON.stringify(rule)
-        });
+        // 检查是否为编辑模式
+        const editId = form.dataset.editId;
+        const isEdit = form.dataset.currentAction === 'edit' && editId;
         
-        form.reset();
-        // 重置后恢复端口输入框状态
-        document.getElementById('port').disabled = false;
-        document.getElementById('port').style.backgroundColor = '';
-        document.getElementById('port').style.cursor = '';
+        let response;
+        if (isEdit) {
+            // 编辑模式：获取完整的规则数据并更新
+            const rules = await apiRequest('/api/v1/rules/');
+            const existingRule = rules.find(r => r.ID == editId);
+            
+            if (existingRule) {
+                // 合并现有数据和更新数据，保留云服务配置相关字段
+                const completeRule = {
+                    ...existingRule,
+                    ...rule,
+                    ID: parseInt(editId), // 确保ID正确
+                };
+                
+                response = await apiRequest(`/api/v1/rules/${editId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(completeRule)
+                });
+            } else {
+                throw new Error('规则不存在');
+            }
+            
+            showMessage('规则更新成功！');
+            
+            // 退出编辑模式
+            cancelEditRule();
+        } else {
+            // 新增模式：添加规则
+            response = await apiRequest('/api/v1/rules/', {
+                method: 'POST',
+                body: JSON.stringify(rule)
+            });
+            
+            form.reset();
+            // 重置后恢复端口输入框状态
+            document.getElementById('port').disabled = false;
+            document.getElementById('port').style.backgroundColor = '';
+            document.getElementById('port').style.cursor = '';
+            
+            showMessage('规则添加成功！');
+        }
         
-        fetchRules();
-        showMessage('规则添加成功！');
+        // 添加小延时后刷新数据，确保后端数据同步
+        setTimeout(() => {
+            fetchRules();
+        }, 500);
     } catch (error) {
-        showMessage(error.message || '添加规则失败', 'error');
+        showMessage(error.message || (form.dataset.currentAction === 'edit' ? '更新规则失败' : '添加规则失败'), 'error');
     } finally {
         setLoading(form, false);
     }
@@ -270,9 +323,82 @@ async function executeRule(id) {
     }
 }
 
-function editRule(id) {
-    // TODO: 实现编辑规则功能
-    showMessage('编辑功能开发中...');
+async function editRule(id) {
+    try {
+        // 获取规则详情
+        const rules = await apiRequest('/api/v1/rules/');
+        const rule = rules.find(r => r.ID === id);
+        
+        if (!rule) {
+            showMessage('规则不存在', 'error');
+            return;
+        }
+        
+        // 确保云服务配置选项已加载
+        await loadCloudConfigOptions();
+        
+        // 填充表单
+        document.getElementById('remark').value = rule.remark || '';
+        document.getElementById('cloudConfigId').value = rule.cloud_config_id || '';
+        document.getElementById('port').value = rule.port || '';
+        document.getElementById('protocol').value = rule.protocol || 'TCP';
+        document.getElementById('enabled').value = rule.enabled ? 'true' : 'false';
+        
+        // 更新表单状态为编辑模式
+        const form = document.getElementById('addRuleForm');
+        const submitButton = form.querySelector('button[type="submit"]');
+        
+        // 保存原始表单状态以便取消编辑
+        if (!form.dataset.originalAction) {
+            form.dataset.originalAction = 'add';
+        }
+        
+        // 设置编辑模式
+        form.dataset.editId = id;
+        form.dataset.currentAction = 'edit';
+        submitButton.textContent = '更新规则';
+        
+        // 添加取消编辑按钮
+        let cancelButton = form.querySelector('.cancel-edit-btn');
+        if (!cancelButton) {
+            cancelButton = document.createElement('button');
+            cancelButton.type = 'button';
+            cancelButton.className = 'btn btn-secondary cancel-edit-btn';
+            cancelButton.textContent = '取消编辑';
+            cancelButton.onclick = cancelEditRule;
+            submitButton.parentNode.insertBefore(cancelButton, submitButton.nextSibling);
+        }
+        
+        // 滚动到表单区域
+        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        showMessage('规则加载成功');
+
+    } catch (error) {
+        console.error('获取规则详情失败:', error);
+        showMessage('获取规则详情失败', 'error');
+    }
+}
+
+function cancelEditRule() {
+    const form = document.getElementById('addRuleForm');
+    const submitButton = form.querySelector('button[type="submit"]');
+    const cancelButton = form.querySelector('.cancel-edit-btn');
+    
+    // 清空表单
+    form.reset();
+    
+    // 恢复新增模式
+    delete form.dataset.editId;
+    form.dataset.currentAction = 'add';
+    submitButton.textContent = '添加规则';
+    
+    // 移除取消按钮
+    if (cancelButton) {
+        cancelButton.remove();
+    }
+    
+    // showMessage('已取消编辑，表单恢复为新增模式');
 }
 
 // ============= 云服务配置管理 =============
@@ -390,16 +516,40 @@ async function addCloudConfig(event) {
             is_enabled: document.getElementById('cloud-enabled').value === 'true',
         };
 
-        await apiRequest('/api/v1/cloud-configs/', {
-            method: 'POST',
-            body: JSON.stringify(config)
-        });
+        // 检查是否为编辑模式
+        const editId = form.dataset.editId;
+        const isEdit = form.dataset.currentAction === 'edit' && editId;
         
-        form.reset();
+        if (isEdit) {
+            // 编辑模式：更新配置
+            // 如果密码为空，则不更新密码字段
+            if (!config.secret_key.trim()) {
+                delete config.secret_key;
+            }
+            
+            await apiRequest(`/api/v1/cloud-configs/${editId}`, {
+                method: 'PUT',
+                body: JSON.stringify(config)
+            });
+            
+            showMessage('云服务配置更新成功！');
+            
+            // 退出编辑模式
+            cancelEditCloudConfig();
+        } else {
+            // 新增模式：添加配置
+            await apiRequest('/api/v1/cloud-configs/', {
+                method: 'POST',
+                body: JSON.stringify(config)
+            });
+            
+            form.reset();
+            showMessage('云服务配置添加成功！');
+        }
+        
         fetchCloudConfigs();
-        showMessage('云服务配置添加成功！');
     } catch (error) {
-        showMessage('添加云服务配置失败', 'error');
+        showMessage(error.message || (form.dataset.currentAction === 'edit' ? '更新云服务配置失败' : '添加云服务配置失败'), 'error');
     } finally {
         setLoading(form, false);
     }
@@ -432,9 +582,85 @@ async function testCloudConfig(id) {
     }
 }
 
-function editCloudConfig(id) {
-    // TODO: 实现编辑云服务配置功能
-    showMessage('编辑功能开发中...');
+async function editCloudConfig(id) {
+    try {
+        // 获取配置详情
+        const configs = await apiRequest('/api/v1/cloud-configs/');
+        const config = configs.find(c => c.ID === id);
+        
+        if (!config) {
+            showMessage('配置不存在', 'error');
+            return;
+        }
+        
+        // 填充云服务配置表单
+        document.getElementById('cloud-provider').value = config.provider || '';
+        document.getElementById('cloud-region').value = config.region || '';
+        document.getElementById('instance-id').value = config.instance_id || '';
+        document.getElementById('secret-id').value = config.secret_id || '';
+        document.getElementById('secret-key').value = config.secret_key || '';
+        document.getElementById('cloud-description').value = config.description || '';
+        document.getElementById('is-default').value = config.is_default ? 'true' : 'false';
+        document.getElementById('cloud-enabled').value = config.is_enabled ? 'true' : 'false';
+        
+        // 切换到云服务配置标签
+        switchTab('cloud-config');
+        
+        // 更新表单状态为编辑模式
+        const form = document.getElementById('addCloudConfigForm');
+        const submitButton = form.querySelector('button[type="submit"]');
+        
+        // 保存原始表单状态
+        if (!form.dataset.originalAction) {
+            form.dataset.originalAction = 'add';
+        }
+        
+        // 设置编辑模式
+        form.dataset.editId = id;
+        form.dataset.currentAction = 'edit';
+        submitButton.textContent = '更新配置';
+        
+        // 添加取消编辑按钮
+        let cancelButton = form.querySelector('.cancel-edit-btn');
+        if (!cancelButton) {
+            cancelButton = document.createElement('button');
+            cancelButton.type = 'button';
+            cancelButton.className = 'btn btn-secondary cancel-edit-btn';
+            cancelButton.textContent = '取消编辑';
+            cancelButton.onclick = cancelEditCloudConfig;
+            submitButton.parentNode.insertBefore(cancelButton, submitButton.nextSibling);
+        }
+        
+        // 滚动到表单区域
+        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        
+        showMessage('加载配置成功');
+        
+    } catch (error) {
+        console.error('获取配置详情失败:', error);
+        showMessage('获取配置详情失败', 'error');
+    }
+}
+
+function cancelEditCloudConfig() {
+    const form = document.getElementById('addCloudConfigForm');
+    const submitButton = form.querySelector('button[type="submit"]');
+    const cancelButton = form.querySelector('.cancel-edit-btn');
+    
+    // 清空表单
+    form.reset();
+    
+    // 恢复新增模式
+    delete form.dataset.editId;
+    form.dataset.currentAction = 'add';
+    submitButton.textContent = '保存配置';
+    
+    // 移除取消按钮
+    if (cancelButton) {
+        cancelButton.remove();
+    }
+    
+    // showMessage('已取消编辑，表单恢复为新增模式');
 }
 
 // ============= 系统设置管理 =============
