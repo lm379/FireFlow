@@ -6,8 +6,33 @@ on:
       - 'v*'
 
 jobs:
-  build:
+  # Create release first
+  create-release:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.create-release.outputs.id }}
+      upload-url: ${{ steps.create-release.outputs.upload_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Release
+        id: create-release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-upload:
+    needs: create-release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
@@ -16,40 +41,62 @@ jobs:
             goarch: amd64
             cgo: 1
             cc: gcc
+            docker: true
           - goos: linux
             goarch: arm64
             cgo: 1
             cc: aarch64-linux-gnu-gcc
-          # - goos: linux
-          #   goarch: arm
-          #   goarm: 7
-          #   cgo: 1
-          #   cc: arm-linux-gnueabihf-gcc
+            docker: true
+          - goos: linux
+            goarch: arm
+            goarm: 7
+            cgo: 1
+            cc: arm-linux-gnueabihf-gcc
+            docker: false
           # Windows builds
           - goos: windows
             goarch: amd64
             cgo: 1
             cc: x86_64-w64-mingw32-gcc
+            docker: false
           - goos: windows
             goarch: arm64
             cgo: 0  # Windows ARM64 CGO support is limited
+            docker: false
           # macOS builds (cross-compilation from Linux usually requires CGO=0)
           - goos: darwin
             goarch: amd64
             cgo: 0
+            docker: false
           - goos: darwin
             goarch: arm64
             cgo: 0
+            docker: false
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
           cache: true
+
+      - name: Set up Docker Buildx
+        if: matrix.docker == true
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: matrix.docker == true
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Install cross-compilation dependencies
         if: matrix.cgo == 1
@@ -111,35 +158,91 @@ jobs:
           echo "✅ Built: ${output} ($(du -h "${output}" | cut -f1))"
           echo "✅ Archive: ${archive} ($(du -h "${archive}" | cut -f1))"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: fireflow-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: fireflow-*.tar.gz
-
-  release:
-    needs: build
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-
-      - name: List files
-        run: |
-          echo "Files to be released:"
-          ls -la fireflow-*.tar.gz
-          echo ""
-          echo "File sizes:"
-          du -h fireflow-*.tar.gz
-
-      - name: Create Release
+      - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: fireflow-*.tar.gz
-          generate_release_notes: true
+          files: fireflow-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Dockerfile for this architecture
+        if: matrix.docker == true
+        run: |
+          cat > Dockerfile.runtime << 'EOF'
+          FROM alpine:latest
+          
+          RUN apk add --no-cache ca-certificates tzdata sqlite-libs && \
+              mkdir -p /app/configs
+          
+          WORKDIR /app
+          
+          # 设置生产环境变量
+          ENV ENV=production
+          ENV GIN_MODE=release
+          
+          # Copy the binary
+          COPY fireflow-${{ matrix.goos }}-${{ matrix.goarch }} ./fireflow
+          
+          # Make binary executable
+          RUN chmod +x ./fireflow
+          
+          EXPOSE 9686
+          
+          CMD ["./fireflow"]
+          EOF
+
+      - name: Build and push Docker image
+        if: matrix.docker == true
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.runtime
+          platforms: linux/${{ matrix.goarch }}
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-${{ matrix.goarch }}
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-${{ matrix.goarch }}
+          labels: |
+            org.opencontainers.image.title=FireFlow
+            org.opencontainers.image.description=Dynamic Firewall Rule Management
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.created=${{ steps.date.outputs.date }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+
+  # Create multi-arch Docker manifest
+  create-manifest:
+    needs: build-and-upload
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          # Create manifest for versioned tag
+          docker manifest create ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }} \
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-amd64 \
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-arm64
+          
+          docker manifest push ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}
+          
+          # Create manifest for latest tag
+          docker manifest create ${{ secrets.DOCKER_USERNAME }}/fireflow:latest \
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-amd64 \
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-arm64
+          
+          docker manifest push ${{ secrets.DOCKER_USERNAME }}/fireflow:latest
+          
+          echo "✅ Multi-arch Docker images published successfully"
+          echo ""
+          echo "📦 Available for users:"
+          echo "  docker pull ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}"
+          echo "  docker pull ${{ secrets.DOCKER_USERNAME }}/fireflow:latest"
+          echo ""
+          echo "🏗️  Supports architectures: linux/amd64, linux/arm64"
+          echo "💡 Docker will automatically pull the correct architecture"

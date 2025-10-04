@@ -12,8 +12,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -24,6 +26,27 @@ var templateFS embed.FS
 
 //go:embed web/static
 var staticFS embed.FS
+
+// 默认配置内容
+const defaultConfigContent = `
+server:
+  port: ":9686"
+
+database:
+  path: "./configs/database.db"  # SQLite数据库文件
+`
+
+// createDefaultConfig 创建默认配置文件
+func createDefaultConfig(configPath string) error {
+	// 确保配置文件目录存在
+	configDir := filepath.Dir(configPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return err
+	}
+
+	// 写入默认配置
+	return os.WriteFile(configPath, []byte(defaultConfigContent), 0644)
+}
 
 // setupWebAssets 设置嵌入的模板和静态文件
 func setupWebAssets(r *gin.Engine) {
@@ -43,24 +66,54 @@ func setupWebAssets(r *gin.Engine) {
 }
 
 func main() {
+	// 加载 .env 文件（如果存在）
+	if err := godotenv.Load(); err != nil {
+		// log.Printf("No .env file found, using system environment variables")
+	} else {
+		log.Printf("Loaded environment variables from .env file")
+	}
+
 	// 设置 Gin 模式
 	if os.Getenv("GIN_MODE") == "" {
-		// 如果没有设置环境变量，根据是否为生产环境自动设置
-		if os.Getenv("ENV") == "production" {
-			gin.SetMode(gin.ReleaseMode)
-		} else {
-			gin.SetMode(gin.DebugMode)
-		}
+		// 如果没有设置环境变量，默认使用 release 模式
+		gin.SetMode(gin.ReleaseMode)
 	}
 
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("./configs")
+
+	// 尝试读取配置文件
 	if err := viper.ReadInConfig(); err != nil {
-		log.Fatalf("Error reading config file: %s", err)
+		// 如果是找不到配置文件的错误，创建默认配置
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			configPath := "./configs/config.yaml"
+			log.Printf("Config file not found, creating default config at %s", configPath)
+
+			if err := createDefaultConfig(configPath); err != nil {
+				log.Fatalf("Failed to create default config file: %v", err)
+			}
+
+			// 重新尝试读取配置
+			if err := viper.ReadInConfig(); err != nil {
+				log.Fatalf("Error reading newly created config file: %v", err)
+			}
+
+			log.Printf("Default config file created successfully at %s", configPath)
+		} else {
+			// 其他读取错误
+			log.Fatalf("Error reading config file: %v", err)
+		}
 	}
 
-	db, err := gorm.Open(sqlite.Open(viper.GetString("database.path")), &gorm.Config{})
+	// 确保数据库目录存在
+	dbPath := viper.GetString("database.path")
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		log.Fatalf("Failed to create database directory: %v", err)
+	}
+
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}

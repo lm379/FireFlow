@@ -17,7 +17,7 @@ RUN CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 FROM alpine:latest
 
 RUN apk add --no-cache ca-certificates tzdata sqlite-libs && \
-    mkdir -p /app/data /app/configs
+    mkdir -p /app/configs
 
 WORKDIR /app
 
@@ -26,7 +26,6 @@ ENV ENV=production
 ENV GIN_MODE=release
 
 COPY --from=builder /app/fireflow .
-COPY configs/config.yaml /app/configs/
 
 EXPOSE 9686
 
