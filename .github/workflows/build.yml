@@ -8,7 +8,7 @@ on:
 jobs:
   # Create release first
   create-release:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     permissions:
       contents: write
     outputs:
@@ -36,42 +36,21 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux builds with CGO
           - goos: linux
             goarch: amd64
-            cgo: 1
-            cc: gcc
-            docker: true
           - goos: linux
             goarch: arm64
-            cgo: 1
-            cc: aarch64-linux-gnu-gcc
-            docker: true
           - goos: linux
             goarch: arm
             goarm: 7
-            cgo: 1
-            cc: arm-linux-gnueabihf-gcc
-            docker: false
-          # Windows builds
           - goos: windows
             goarch: amd64
-            cgo: 1
-            cc: x86_64-w64-mingw32-gcc
-            docker: false
           - goos: windows
             goarch: arm64
-            cgo: 0  # Windows ARM64 CGO support is limited
-            docker: false
-          # macOS builds (cross-compilation from Linux usually requires CGO=0)
           - goos: darwin
             goarch: amd64
-            cgo: 0
-            docker: false
           - goos: darwin
             goarch: arm64
-            cgo: 0
-            docker: false
 
     steps:
       - name: Checkout code
@@ -87,46 +66,15 @@ jobs:
           go-version: '1.24'
           cache: true
 
-      - name: Set up Docker Buildx
-        if: matrix.docker == true
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        if: matrix.docker == true
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Install cross-compilation dependencies
-        if: matrix.cgo == 1
-        run: |
-          sudo apt-get update
-          
-          # Install dependencies based on target architecture to avoid conflicts
-          if [[ "${{ matrix.goarch }}" == "amd64" && "${{ matrix.goos }}" == "linux" ]]; then
-            # For Linux AMD64, we can use the default gcc
-            sudo apt-get install -y build-essential
-          elif [[ "${{ matrix.goarch }}" == "arm64" && "${{ matrix.goos }}" == "linux" ]]; then
-            # For Linux ARM64
-            sudo apt-get install -y gcc-aarch64-linux-gnu
-          elif [[ "${{ matrix.goarch }}" == "arm" && "${{ matrix.goos }}" == "linux" ]]; then
-            # For Linux ARM v7
-            sudo apt-get install -y gcc-arm-linux-gnueabihf
-          elif [[ "${{ matrix.goos }}" == "windows" ]]; then
-            # For Windows cross-compilation
-            sudo apt-get install -y gcc-mingw-w64
-          fi
-
       - name: Get dependencies
         run: go mod download
 
       - name: Build binary
         env:
-          CGO_ENABLED: ${{ matrix.cgo }}
+          CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CC: ${{ matrix.cc }}
+          GOARM: ${{ matrix.goarm }}
         run: |
           # Determine file extension
           ext=""
@@ -164,91 +112,3 @@ jobs:
           files: fireflow-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create Dockerfile for this architecture
-        if: matrix.docker == true
-        run: |
-          cat > Dockerfile.runtime << 'EOF'
-          FROM alpine:latest
-          
-          RUN apk add --no-cache ca-certificates tzdata sqlite-libs && \
-              mkdir -p /app/configs
-          
-          WORKDIR /app
-          
-          # 设置生产环境变量
-          ENV ENV=production
-          ENV GIN_MODE=release
-          
-          # Copy the binary
-          COPY fireflow-${{ matrix.goos }}-${{ matrix.goarch }} /app/fireflow
-          
-          # Make binary executable
-          RUN chmod +x /app/fireflow
-          
-          EXPOSE 9686
-          
-          CMD ["./fireflow"]
-          EOF
-
-      - name: Build and push Docker image
-        if: matrix.docker == true
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.runtime
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-${{ matrix.goarch }}
-            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-${{ matrix.goarch }}
-          labels: |
-            org.opencontainers.image.title=FireFlow
-            org.opencontainers.image.description=Dynamic Firewall Rule Management
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.created=${{ steps.date.outputs.date }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.licenses=MIT
-
-  # Create multi-arch Docker manifest
-  create-manifest:
-    needs: build-and-upload
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Create and push multi-arch manifest
-        run: |
-          # Create manifest for versioned tag
-          docker manifest create ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }} \
-            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-amd64 \
-            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-arm64
-          
-          docker manifest push ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}
-          
-          # Create manifest for latest tag
-          docker manifest create ${{ secrets.DOCKER_USERNAME }}/fireflow:latest \
-            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-amd64 \
-            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-arm64
-          
-          docker manifest push ${{ secrets.DOCKER_USERNAME }}/fireflow:latest
-          
-          echo "✅ Multi-arch Docker images published successfully"
-          echo ""
-          echo "📦 Available for users:"
-          echo "  docker pull ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}"
-          echo "  docker pull ${{ secrets.DOCKER_USERNAME }}/fireflow:latest"
-          echo ""
-          echo "🏗️  Supports architectures: linux/amd64, linux/arm64"
-          echo "💡 Docker will automatically pull the correct architecture"
-
-      - name: Clean up temporary arch tags
-        run: |
-          docker buildx imagetools remove ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-amd64 || true
-          docker buildx imagetools remove ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-arm64 || true
-          docker buildx imagetools remove ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-amd64 || true
-          docker buildx imagetools remove ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-arm64 || true
