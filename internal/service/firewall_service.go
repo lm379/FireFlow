@@ -1,13 +1,13 @@
 package service
 
 import (
+	"FireFlow/internal/core"
 	"FireFlow/internal/model"
 	"FireFlow/internal/repository"
 	"FireFlow/internal/utils"
 	"FireFlow/pkg/cloud"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -16,6 +16,7 @@ import (
 type FirewallService struct {
 	repo          repository.FirewallRepository
 	tencentClient *cloud.TencentClient
+	aliyunClient  *cloud.AliyunClient
 	configService ConfigService
 }
 
@@ -38,9 +39,29 @@ func NewFirewallService(repo repository.FirewallRepository, configService Config
 		}
 	}
 
+	// Initialize Aliyun ECS client from config
+	aliyunConfig := cloud.AliyunConfig{
+		AccessKeyID:      viper.GetString("cloud.aliyun.access_key_id"),
+		AccessKeySecret:  viper.GetString("cloud.aliyun.access_key_secret"),
+		RegionID:         viper.GetString("cloud.aliyun.region_id"),
+		SecurityGroupIds: viper.GetString("cloud.aliyun.security_group_ids"),
+	}
+
+	var aliyunClient *cloud.AliyunClient
+	if aliyunConfig.AccessKeyID != "" && aliyunConfig.AccessKeySecret != "" {
+		var err error
+		aliyunClient, err = cloud.NewAliyunClient(aliyunConfig)
+		if err != nil {
+			log.Printf("Failed to initialize Aliyun ECS client: %v", err)
+		} else {
+			log.Println("Successfully initialized Aliyun ECS client")
+		}
+	}
+
 	return &FirewallService{
 		repo:          repo,
 		tencentClient: tencentClient,
+		aliyunClient:  aliyunClient,
 		configService: configService,
 	}
 }
@@ -49,40 +70,13 @@ func NewFirewallService(repo repository.FirewallRepository, configService Config
 func (s *FirewallService) UpdateAllRules() {
 	log.Println("Starting firewall update job...")
 
-	// 1. Get current public IP using configured URL
-	var currentIP string
-	var err error
-
-	if s.configService != nil {
-		// 获取配置的IP查询URL
-		ipFetchURL, configErr := s.configService.GetConfig("ip_fetch_url")
-		if configErr != nil || ipFetchURL == "" {
-			ipFetchURL = "https://4.ipw.cn" // 默认URL
-		}
-		currentIP, err = utils.GetPublicIPWithURL(ipFetchURL)
-	} else {
-		// 降级到默认方法
-		currentIP, err = utils.GetPublicIP()
-	}
-
+	// 获取并验证当前公网IP
+	currentIP, err := utils.GetValidatedPublicIP(s.configService)
 	if err != nil {
-		log.Printf("Error getting public IP: %v", err)
+		log.Printf("Error getting/validating public IP: %v", err)
 		return
 	}
 	log.Printf("Current public IP is: %s", currentIP)
-
-	// 检查IP合法性（只允许IPv4，禁止IPv6、JSON、报错信息、内容过长等）
-	if len(currentIP) > 40 || strings.Contains(currentIP, ":") || strings.ContainsAny(currentIP, "[{") || strings.Contains(strings.ToLower(currentIP), "error") || strings.Contains(strings.ToLower(currentIP), "html") {
-		log.Printf("获取到的IP地址不合法，未触发规则更新。")
-		return
-	}
-	// 严格正则校验IPv4
-	ipv4Pattern := `^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`
-	matched, _ := regexp.MatchString(ipv4Pattern, currentIP)
-	if !matched {
-		log.Printf("获取到的IP地址不是合法IPv4，未触发规则更新。")
-		return
-	}
 
 	// 2. Get all enabled rules from the database
 	rules, err := s.repo.GetAllEnabled()
@@ -99,6 +93,18 @@ func (s *FirewallService) UpdateAllRules() {
 			continue
 		}
 
+		// 检查规则是否启用
+		if !rule.Enabled {
+			log.Printf("Skipping rule %d: rule is disabled", rule.ID)
+			continue
+		}
+
+		// 检查对应的云服务配置是否启用
+		if err := s.checkCloudConfigEnabled(rule.Provider); err != nil {
+			log.Printf("Skipping rule %d: %v", rule.ID, err)
+			continue
+		}
+
 		log.Printf("Processing rule %d (%s) - Current IP: %s, Last IP: %s", rule.ID, rule.Remark, currentIP, rule.LastIP)
 
 		var updateErr error
@@ -107,7 +113,7 @@ func (s *FirewallService) UpdateAllRules() {
 			// 使用getTencentClient方法获取客户端，而不是检查全局客户端
 			updateErr = s.updateTencentFirewallRule(&rule, currentIP)
 		case "Aliyun":
-			updateErr = fmt.Errorf("Aliyun provider not implemented yet")
+			updateErr = s.updateAliyunFirewallRule(&rule, currentIP)
 		default:
 			updateErr = fmt.Errorf("unsupported provider: %s", rule.Provider)
 		}
@@ -124,6 +130,22 @@ func (s *FirewallService) UpdateAllRules() {
 		}
 	}
 	log.Println("Firewall update job finished.")
+}
+
+// checkCloudConfigEnabled 检查指定提供商的云服务配置是否启用
+func (s *FirewallService) checkCloudConfigEnabled(provider string) error {
+	// 获取该提供商的云服务配置
+	config, err := s.configService.GetCloudConfig(provider)
+	if err != nil {
+		return fmt.Errorf("cloud config for provider %s not found", provider)
+	}
+
+	// 检查配置是否启用
+	if !config.IsEnabled {
+		return fmt.Errorf("cloud config for provider %s is disabled", provider)
+	}
+
+	return nil
 }
 
 // createAndUpdateTencentFirewallRule 创建新的防火墙规则并更新数据库
@@ -238,6 +260,10 @@ func (s *FirewallService) GetAllRules() ([]model.FirewallRule, error) {
 	return s.repo.GetAll()
 }
 
+func (s *FirewallService) GetRuleByID(id uint) (*model.FirewallRule, error) {
+	return s.repo.GetByID(id)
+}
+
 // GetEnabledRulesCount 获取启用规则的数量
 func (s *FirewallService) GetEnabledRulesCount() (int, error) {
 	enabledRules, err := s.repo.GetAllEnabled()
@@ -266,21 +292,20 @@ func (s *FirewallService) ExecuteRule(id uint) error {
 		return fmt.Errorf("failed to get rule: %v", err)
 	}
 
-	// 获取当前公网IP
-	var currentIP string
-	if s.configService != nil {
-		// 获取配置的IP查询URL
-		ipFetchURL, configErr := s.configService.GetConfig("ip_fetch_url")
-		if configErr != nil || ipFetchURL == "" {
-			ipFetchURL = "https://4.ipw.cn" // 默认URL
-		}
-		currentIP, err = utils.GetPublicIPWithURL(ipFetchURL)
-	} else {
-		// 降级到默认方法
-		currentIP, err = utils.GetPublicIP()
+	// 检查规则是否启用
+	if !rule.Enabled {
+		return fmt.Errorf("rule %d is disabled, skipping execution", id)
 	}
+
+	// 检查对应的云服务配置是否启用
+	if err := s.checkCloudConfigEnabled(rule.Provider); err != nil {
+		return err
+	}
+
+	// 获取并验证当前公网IP
+	currentIP, err := utils.GetValidatedPublicIP(s.configService)
 	if err != nil {
-		return fmt.Errorf("failed to get current IP: %v", err)
+		return fmt.Errorf("failed to get/validate current IP: %v", err)
 	}
 
 	// 执行规则更新
@@ -293,8 +318,12 @@ func (s *FirewallService) ExecuteRule(id uint) error {
 			return s.updateTencentFirewallRule(rule, currentIP)
 		}
 	case "Aliyun":
-		// TODO: 实现阿里云规则更新
-		return fmt.Errorf("Aliyun provider not implemented yet")
+		// 如果规则ID为空，需要先创建规则
+		if rule.RuleID == "" {
+			return s.createAndUpdateAliyunFirewallRule(rule, currentIP)
+		} else {
+			return s.updateAliyunFirewallRule(rule, currentIP)
+		}
 	default:
 		return fmt.Errorf("unsupported provider: %s", rule.Provider)
 	}
@@ -369,4 +398,406 @@ func (s *FirewallService) GetInstanceInfo(instanceID string) (*cloud.InstanceInf
 	}
 
 	return s.tencentClient.GetInstance(instanceID)
+}
+
+// ============= 阿里云相关方法 =============
+
+// updateAliyunFirewallRule 更新阿里云防火墙规则
+func (s *FirewallService) updateAliyunFirewallRule(rule *model.FirewallRule, newIP string) error {
+	client, err := s.getAliyunClient(rule.CloudConfigID)
+	if err != nil {
+		return fmt.Errorf("failed to get Aliyun client: %v", err)
+	}
+
+	// 创建防火墙规则规格
+	ruleSpec := &cloud.FirewallRuleSpec{
+		Port:        rule.Port,
+		Protocol:    rule.Protocol,
+		CidrBlock:   fmt.Sprintf("%s/32", newIP),
+		Action:      "ACCEPT",
+		Description: rule.Remark,
+	}
+
+	// 更新规则
+	result, err := client.UpdateFirewallRule(rule.InstanceID, rule.RuleID, ruleSpec, newIP)
+	if err != nil {
+		// 如果更新失败，可能是规则已被手动删除，尝试重新创建
+		errStr := err.Error()
+		if strings.Contains(errStr, "InvalidSecurityGroupRule.NotFound") || 
+		   strings.Contains(errStr, "rule does not exist") ||
+		   strings.Contains(errStr, "not found") {
+			log.Printf("Rule %s not found in cloud, attempting to recreate", rule.RuleID)
+			
+			// 尝试重新创建规则
+			result, createErr := client.CreateFirewallRule(rule.InstanceID, ruleSpec)
+			if createErr != nil {
+				return fmt.Errorf("failed to recreate Aliyun firewall rule after rule not found: %v", createErr)
+			}
+			
+			// 更新数据库中的规则ID
+			rule.RuleID = result.RuleID
+			if err := s.repo.Update(rule); err != nil {
+				log.Printf("Failed to update rule ID in database: %v", err)
+			}
+			
+			log.Printf("Successfully recreated Aliyun firewall rule %s for instance %s: %s", 
+				rule.RuleID, rule.InstanceID, newIP)
+			return nil
+		}
+		return fmt.Errorf("failed to update Aliyun firewall rule: %v", err)
+	}
+
+	// 更新数据库中的规则ID（如果有变化）
+	if result.RuleID != rule.RuleID {
+		rule.RuleID = result.RuleID
+		if err := s.repo.Update(rule); err != nil {
+			log.Printf("Failed to update rule ID in database: %v", err)
+		}
+	}
+
+	log.Printf("Successfully updated Aliyun firewall rule %s for instance %s: %s -> %s",
+		rule.RuleID, rule.InstanceID, rule.LastIP, newIP)
+
+	return nil
+}
+
+// createAndUpdateAliyunFirewallRule 创建并更新阿里云防火墙规则
+func (s *FirewallService) createAndUpdateAliyunFirewallRule(rule *model.FirewallRule, currentIP string) error {
+	client, err := s.getAliyunClient(rule.CloudConfigID)
+	if err != nil {
+		return fmt.Errorf("failed to get Aliyun client: %v", err)
+	}
+
+	// 创建防火墙规则规格
+	ruleSpec := &cloud.FirewallRuleSpec{
+		Port:        rule.Port,
+		Protocol:    rule.Protocol,
+		CidrBlock:   fmt.Sprintf("%s/32", currentIP),
+		Action:      "ACCEPT",
+		Description: rule.Remark,
+	}
+
+	// 创建规则
+	result, err := client.CreateFirewallRule(rule.InstanceID, ruleSpec)
+	if err != nil {
+		return fmt.Errorf("failed to create Aliyun firewall rule: %v", err)
+	}
+
+	// 更新数据库中的规则ID和IP
+	rule.RuleID = result.RuleID
+	if err := s.repo.Update(rule); err != nil {
+		log.Printf("Failed to update rule ID in database: %v", err)
+	}
+
+	if err := s.repo.UpdateIP(rule.ID, currentIP); err != nil {
+		log.Printf("Failed to update IP in database: %v", err)
+	}
+
+	log.Printf("Successfully created Aliyun firewall rule %s for instance %s with IP %s",
+		result.RuleID, rule.InstanceID, currentIP)
+
+	return nil
+}
+
+// CreateAliyunFirewallRule 创建新的阿里云防火墙规则并保存到数据库
+func (s *FirewallService) CreateAliyunFirewallRule(instanceID, port, cidrBlock, protocol, description string) error {
+	if s.aliyunClient == nil {
+		return fmt.Errorf("Aliyun client not initialized")
+	}
+
+	// 创建防火墙规则规格
+	ruleSpec := &cloud.FirewallRuleSpec{
+		Port:        port,
+		Protocol:    protocol,
+		CidrBlock:   cidrBlock,
+		Action:      "ACCEPT",
+		Description: description,
+	}
+
+	// 创建规则
+	result, err := s.aliyunClient.CreateFirewallRule(instanceID, ruleSpec)
+	if err != nil {
+		return fmt.Errorf("failed to create Aliyun firewall rule: %v", err)
+	}
+
+	// 保存到数据库
+	rule := &model.FirewallRule{
+		RuleID:     result.RuleID,
+		Remark:     description,
+		InstanceID: instanceID,
+		Port:       port,
+		Protocol:   protocol,
+		Provider:   "Aliyun",
+		Enabled:    true,
+	}
+
+	if err := s.repo.Create(rule); err != nil {
+		// 如果数据库保存失败，尝试删除云端规则
+		if deleteErr := s.aliyunClient.DeleteFirewallRule(instanceID, result.RuleID); deleteErr != nil {
+			log.Printf("Failed to rollback Aliyun firewall rule creation: %v", deleteErr)
+		}
+		return fmt.Errorf("failed to save rule to database: %v", err)
+	}
+
+	log.Printf("Successfully created and saved Aliyun firewall rule: %s", result.RuleID)
+	return nil
+}
+
+// getAliyunClient 获取阿里云客户端
+func (s *FirewallService) getAliyunClient(cloudConfigID uint) (*cloud.AliyunClient, error) {
+	// 如果有全局客户端，直接使用
+	if s.aliyunClient != nil {
+		return s.aliyunClient, nil
+	}
+
+	// 否则根据配置ID创建客户端
+	if s.configService == nil {
+		return nil, fmt.Errorf("config service not available")
+	}
+
+	config, err := s.configService.GetCloudConfigByID(cloudConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cloud config: %v", err)
+	}
+
+	if config.Provider != "Aliyun" {
+		return nil, fmt.Errorf("invalid provider: expected Aliyun, got %s", config.Provider)
+	}
+
+	// 解析阿里云配置
+	aliyunConfig := cloud.AliyunConfig{
+		AccessKeyID:      config.SecretId,
+		AccessKeySecret:  config.SecretKey,
+		RegionID:         config.Region,
+		SecurityGroupIds: config.InstanceId, // 在云配置中，实例ID字段用于存储安全组ID
+	}
+
+	return cloud.NewAliyunClient(aliyunConfig)
+}
+
+// GetAliyunInstanceInfo 获取阿里云实例信息
+func (s *FirewallService) GetAliyunInstanceInfo(instanceID string, cloudConfigID uint) (*cloud.InstanceInfo, error) {
+	client, err := s.getAliyunClient(cloudConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Aliyun client: %v", err)
+	}
+
+	return client.GetInstance(instanceID)
+}
+
+// UpdateSingleRule 更新单个规则的IP
+func (s *FirewallService) UpdateSingleRule(ruleID uint) error {
+	log.Printf("Starting update for rule %d...", ruleID)
+
+	// 获取规则信息
+	rule, err := s.repo.GetByID(ruleID)
+	if err != nil {
+		log.Printf("Error getting rule %d: %v", ruleID, err)
+		return err
+	}
+
+	if !rule.Enabled {
+		log.Printf("Rule %d is disabled, skipping update", ruleID)
+		return nil
+	}
+
+	// 获取并验证当前公网IP
+	currentIP, err := utils.GetValidatedPublicIP(s.configService)
+	if err != nil {
+		log.Printf("Error getting/validating public IP for rule %d: %v", ruleID, err)
+		return err
+	}
+
+	log.Printf("Current public IP for rule %d: %s", ruleID, currentIP)
+
+	// 检查IP是否改变
+	if rule.LastIP == currentIP {
+		log.Printf("IP not changed for rule %d (%s), updating timestamp only", ruleID, currentIP)
+		// 仍需要更新数据库以更新UpdatedAt时间
+		return s.repo.Update(rule)
+	}
+
+	log.Printf("IP changed for rule %d from %s to %s, updating...", ruleID, rule.LastIP, currentIP)
+
+	// 根据Provider更新防火墙规则
+	switch rule.Provider {
+	case "TencentCloud":
+		err = s.updateTencentFirewallRule(rule, currentIP)
+	case "Aliyun":
+		err = s.updateAliyunFirewallRule(rule, currentIP)
+	default:
+		err = fmt.Errorf("unsupported provider: %s", rule.Provider)
+	}
+
+	if err != nil {
+		log.Printf("Failed to update rule %d: %v", ruleID, err)
+		return err
+	}
+
+	// 更新数据库记录 - 更新IP并自动更新UpdatedAt时间
+	rule.LastIP = currentIP
+	err = s.repo.Update(rule)
+	if err != nil {
+		log.Printf("Failed to update database for rule %d: %v", ruleID, err)
+		return err
+	}
+
+	log.Printf("Successfully updated rule %d with new IP: %s", ruleID, currentIP)
+	return nil
+}
+
+// StartRuleUpdateJobs 为所有启用的规则启动定时任务
+func (s *FirewallService) StartRuleUpdateJobs(cronManager interface{}) error {
+	// 类型断言
+	cm, ok := cronManager.(*core.CronManager)
+	if !ok {
+		return fmt.Errorf("invalid cronManager type")
+	}
+
+	// 获取间隔时间配置
+	intervalStr, err := s.configService.GetConfig("ip_check_interval")
+	if err != nil || intervalStr == "" {
+		intervalStr = "5" // 默认5分钟
+	}
+
+	var intervalMinutes int
+	if _, err := fmt.Sscanf(intervalStr, "%d", &intervalMinutes); err != nil {
+		intervalMinutes = 5 // 默认5分钟
+	}
+
+	// 获取所有启用的规则
+	rules, err := s.repo.GetAllEnabled()
+	if err != nil {
+		return fmt.Errorf("failed to get enabled rules: %v", err)
+	}
+
+	// 为每个规则创建定时任务
+	for _, rule := range rules {
+		ruleID := rule.ID
+		err := cm.StartRuleUpdateJob(ruleID, intervalMinutes, func() {
+			s.UpdateSingleRule(ruleID)
+		})
+		if err != nil {
+			log.Printf("Failed to start update job for rule %d: %v", ruleID, err)
+		}
+	}
+
+	log.Printf("Started update jobs for %d enabled rules", len(rules))
+	return nil
+}
+
+// StartSingleRuleUpdateJob 为单个规则启动定时任务
+func (s *FirewallService) StartSingleRuleUpdateJob(ruleID uint, cronManager interface{}) error {
+	// 类型断言
+	cm, ok := cronManager.(*core.CronManager)
+	if !ok {
+		return fmt.Errorf("invalid cronManager type")
+	}
+
+	// 获取间隔时间配置
+	intervalStr, err := s.configService.GetConfig("ip_check_interval")
+	if err != nil || intervalStr == "" {
+		intervalStr = "5" // 默认5分钟
+	}
+
+	var intervalMinutes int
+	if _, err := fmt.Sscanf(intervalStr, "%d", &intervalMinutes); err != nil {
+		intervalMinutes = 5 // 默认5分钟
+	}
+
+	// 创建定时任务
+	return cm.StartRuleUpdateJob(ruleID, intervalMinutes, func() {
+		s.UpdateSingleRule(ruleID)
+	})
+}
+
+// StopSingleRuleUpdateJob 停止单个规则的定时任务
+func (s *FirewallService) StopSingleRuleUpdateJob(ruleID uint, cronManager interface{}) {
+	// 类型断言
+	cm, ok := cronManager.(*core.CronManager)
+	if !ok {
+		log.Printf("Invalid cronManager type for stopping rule %d job", ruleID)
+		return
+	}
+
+	cm.StopRuleUpdateJob(ruleID)
+}
+
+// SyncCloudRules 同步云端规则，清理本地数据库中已经不存在于云端的规则
+func (s *FirewallService) SyncCloudRules() error {
+	// 获取所有本地规则
+	rules, err := s.repo.GetAll()
+	if err != nil {
+		return fmt.Errorf("failed to get local rules: %v", err)
+	}
+
+	var deletedCount int
+	for _, rule := range rules {
+		var shouldDelete bool
+		switch rule.Provider {
+		case "TencentCloud":
+			shouldDelete, err = s.syncTencentRule(&rule)
+		case "Aliyun":
+			shouldDelete, err = s.syncAliyunRule(&rule)
+		default:
+			continue
+		}
+
+		if err != nil {
+			log.Printf("Failed to sync rule %d (%s): %v", rule.ID, rule.RuleID, err)
+			continue
+		}
+
+		if shouldDelete {
+			deletedCount++
+		}
+	}
+
+	if deletedCount > 0 {
+		log.Printf("Sync completed: deleted %d rules that no longer exist in cloud", deletedCount)
+	} else {
+		log.Printf("Sync completed: all local rules exist in cloud")
+	}
+
+	return nil
+}
+
+// syncAliyunRule 同步单个阿里云规则，返回是否应该删除该规则
+func (s *FirewallService) syncAliyunRule(rule *model.FirewallRule) (bool, error) {
+	client, err := s.getAliyunClient(rule.CloudConfigID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get Aliyun client: %v", err)
+	}
+
+	// 获取云端规则列表
+	cloudRules, err := client.ListFirewallRules(rule.InstanceID)
+	if err != nil {
+		return false, fmt.Errorf("failed to list cloud rules: %v", err)
+	}
+
+	// 检查本地规则是否存在于云端
+	found := false
+	for _, cloudRule := range cloudRules {
+		if cloudRule.RuleID == rule.RuleID {
+			found = true
+			break
+		}
+	}
+
+	// 如果云端不存在该规则，从本地数据库删除
+	if !found {
+		log.Printf("Rule %s (ID: %d) not found in cloud, deleting from local database", rule.RuleID, rule.ID)
+		if err := s.repo.Delete(rule.ID); err != nil {
+			return false, fmt.Errorf("failed to delete rule from database: %v", err)
+		}
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// syncTencentRule 同步单个腾讯云规则，返回是否应该删除该规则
+func (s *FirewallService) syncTencentRule(rule *model.FirewallRule) (bool, error) {
+	// TODO: 实现腾讯云规则同步逻辑
+	return false, nil
 }

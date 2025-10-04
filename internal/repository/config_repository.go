@@ -21,14 +21,7 @@ type ConfigRepository interface {
 	ListCloudProviders() ([]model.CloudProviderConfig, error)
 	UpdateCloudProviderConfig(config *model.CloudProviderConfig) error
 	DeleteCloudProviderConfig(id uint) error
-
-	// 定时任务配置
-	GetCronJobConfig(jobName string) (*model.CronJobConfig, error)
-	SetCronJobConfig(config *model.CronJobConfig) error
-	ListCronJobs() ([]model.CronJobConfig, error)
-	UpdateCronJobStatus(jobName string, isEnabled bool) error
-	UpdateCronJobConfig(config *model.CronJobConfig) error
-	DeleteCronJobConfig(id uint) error
+	HasAssociatedRules(cloudConfigID uint) (bool, error)
 }
 
 type configRepository struct {
@@ -116,7 +109,7 @@ func (r *configRepository) GetDefaultCloudProvider() (*model.CloudProviderConfig
 
 func (r *configRepository) ListCloudProviders() ([]model.CloudProviderConfig, error) {
 	var configs []model.CloudProviderConfig
-	result := r.db.Where("is_enabled = ?", true).Find(&configs)
+	result := r.db.Find(&configs)
 	return configs, result.Error
 }
 
@@ -125,49 +118,20 @@ func (r *configRepository) UpdateCloudProviderConfig(config *model.CloudProvider
 	if config.IsDefault {
 		r.db.Model(&model.CloudProviderConfig{}).Where("id != ?", config.ID).Update("is_default", false)
 	}
-	return r.db.Save(config).Error
+	// 使用Select方法明确指定要更新的字段，确保布尔字段也能正确更新
+	return r.db.Model(&model.CloudProviderConfig{}).Where("id = ?", config.ID).
+		Select("provider", "secret_id", "secret_key", "region", "instance_id", "extra", "is_default", "is_enabled", "description", "updated_at").
+		Updates(config).Error
 }
 
 func (r *configRepository) DeleteCloudProviderConfig(id uint) error {
-	return r.db.Delete(&model.CloudProviderConfig{}, id).Error
+	return r.db.Unscoped().Delete(&model.CloudProviderConfig{}, id).Error
 }
 
-// 定时任务配置方法
-func (r *configRepository) GetCronJobConfig(jobName string) (*model.CronJobConfig, error) {
-	var config model.CronJobConfig
-	result := r.db.Where("job_name = ?", jobName).First(&config)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	return &config, nil
-}
-
-func (r *configRepository) SetCronJobConfig(config *model.CronJobConfig) error {
-	result := r.db.Where("job_name = ?", config.JobName).FirstOrCreate(config)
-	if result.Error != nil {
-		return result.Error
-	}
-
-	// 更新配置
-	return r.db.Model(config).Updates(config).Error
-}
-
-func (r *configRepository) ListCronJobs() ([]model.CronJobConfig, error) {
-	var configs []model.CronJobConfig
-	result := r.db.Find(&configs)
-	return configs, result.Error
-}
-
-func (r *configRepository) UpdateCronJobStatus(jobName string, isEnabled bool) error {
-	return r.db.Model(&model.CronJobConfig{}).Where("job_name = ?", jobName).Update("is_enabled", isEnabled).Error
-}
-
-func (r *configRepository) UpdateCronJobConfig(config *model.CronJobConfig) error {
-	return r.db.Save(config).Error
-}
-
-func (r *configRepository) DeleteCronJobConfig(id uint) error {
-	return r.db.Delete(&model.CronJobConfig{}, id).Error
+func (r *configRepository) HasAssociatedRules(cloudConfigID uint) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.FirewallRule{}).Where("cloud_config_id = ?", cloudConfigID).Count(&count).Error
+	return count > 0, err
 }
 
 // 辅助方法：将结构体转换为JSON字符串

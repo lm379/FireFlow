@@ -51,7 +51,10 @@ func (r *firewallRepo) Create(rule *model.FirewallRule) error {
 }
 
 func (r *firewallRepo) Update(rule *model.FirewallRule) error {
-	return r.db.Save(rule).Error
+	// 使用Select方法明确指定要更新的字段，确保布尔字段也能正确更新，但保留created_at
+	return r.db.Model(&model.FirewallRule{}).Where("id = ?", rule.ID).
+		Select("provider", "cloud_config_id", "instance_id", "port", "protocol", "rule_id", "last_ip", "enabled", "remark", "updated_at").
+		Updates(rule).Error
 }
 
 func (r *firewallRepo) UpdateIP(id uint, ip string) error {

@@ -33,3 +33,6 @@ docker-compose.yml
 
 # Ignore sqlite database files
 *.db
+
+test/
+data/

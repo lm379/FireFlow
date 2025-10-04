@@ -4,7 +4,7 @@
 
 ### ✅ 已实现
 - SQLite数据库存储
-- 腾讯云Lighthouse防火墙规则管理
+- 腾讯云Lighthouse、阿里云ECS防火墙规则管理
 - 定时任务自动更新IP
 - Web管理界面
 - RESTful API
@@ -23,3 +23,7 @@ docker run -d \
 
 ### 二进制直接运行
 前往 [Release](https://github.com/lm379/FireFlow/releases) 下载对应架构的二进制包，解压后直接运行即可
+
+## 配置填写
+
+腾讯云轻量填实例ID，阿里云ECS填写安全组ID

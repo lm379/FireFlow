@@ -127,7 +127,6 @@ func main() {
 		&model.FirewallRule{},
 		&model.ConfigItem{},
 		&model.CloudProviderConfig{},
-		&model.CronJobConfig{},
 	); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
@@ -140,12 +139,17 @@ func main() {
 	configService := service.NewConfigService(configRepo)
 	firewallService := service.NewFirewallService(firewallRepo, configService)
 
-	// 初始化定时任务管理器，但不自动启动任务
+	// 初始化定时任务管理器
 	cronManager := core.NewCronManager()
 	cronManager.SetUpdateFunc(func() {
 		firewallService.UpdateAllRules()
 	})
-	cronManager.Start() // 只启动cron引擎，不添加具体任务
+	cronManager.Start() // 启动cron引擎
+
+	// 为所有启用的规则启动独立的定时任务
+	if err := firewallService.StartRuleUpdateJobs(cronManager); err != nil {
+		log.Printf("Failed to start rule update jobs: %v", err)
+	}
 
 	r := gin.Default()
 

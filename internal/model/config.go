@@ -28,14 +28,3 @@ type CloudProviderConfig struct {
 	IsEnabled   bool   `gorm:"default:true;comment:是否启用" json:"is_enabled"`
 	Description string `gorm:"type:varchar(255);comment:配置描述" json:"description"`
 }
-
-// CronJobConfig 定时任务配置模型
-type CronJobConfig struct {
-	gorm.Model
-	JobName     string          `gorm:"type:varchar(100);not null;comment:任务名称" json:"job_name"`
-	CronExpr    string          `gorm:"type:varchar(100);not null;comment:Cron表达式" json:"cron_expr"`
-	Description string          `gorm:"type:varchar(255);comment:任务描述" json:"description"`
-	IsEnabled   bool            `gorm:"default:true;comment:是否启用" json:"is_enabled"`
-	LastRun     *gorm.DeletedAt `gorm:"comment:上次运行时间" json:"last_run"`
-	NextRun     *gorm.DeletedAt `gorm:"comment:下次运行时间" json:"next_run"`
-}

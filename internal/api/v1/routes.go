@@ -11,39 +11,32 @@ import (
 func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallService, configService service.ConfigService, cronManager *core.CronManager) {
 	firewallHandler := NewFirewallHandler(firewallService)
 	firewallHandler.SetConfigService(configService) // 设置配置服务
+	firewallHandler.SetCronManager(cronManager)     // 设置定时任务管理器
 	configHandler := NewConfigHandler(configService, cronManager)
 	configHandler.SetFirewallService(firewallService) // 设置防火墙服务
 	cloudConfigHandler := NewCloudConfigHandler(configService)
-	cronJobHandler := NewCronJobHandler(configService)
 
 	// 防火墙规则路由
 	ruleRoutes := router.Group("/rules")
 	{
 		ruleRoutes.GET("/", firewallHandler.GetRules)
+		ruleRoutes.GET("/:id", firewallHandler.GetRule)
 		ruleRoutes.POST("/", firewallHandler.CreateRule)
 		ruleRoutes.PUT("/:id", firewallHandler.UpdateRule)
 		ruleRoutes.DELETE("/:id", firewallHandler.DeleteRule)
 		ruleRoutes.POST("/:id/execute", firewallHandler.ExecuteRule)
+		ruleRoutes.POST("/sync", firewallHandler.SyncRules)
 	}
 
 	// 云服务配置路由
 	cloudConfigRoutes := router.Group("/cloud-configs")
 	{
 		cloudConfigRoutes.GET("/", cloudConfigHandler.GetCloudConfigs)
+		cloudConfigRoutes.GET("/:id", cloudConfigHandler.GetCloudConfig)
 		cloudConfigRoutes.POST("/", cloudConfigHandler.CreateCloudConfig)
 		cloudConfigRoutes.PUT("/:id", cloudConfigHandler.UpdateCloudConfig)
 		cloudConfigRoutes.DELETE("/:id", cloudConfigHandler.DeleteCloudConfig)
 		cloudConfigRoutes.POST("/:id/test", cloudConfigHandler.TestCloudConfig)
-	}
-
-	// 定时任务路由
-	cronJobRoutes := router.Group("/cron-jobs")
-	{
-		cronJobRoutes.GET("/", cronJobHandler.GetCronJobs)
-		cronJobRoutes.POST("/", cronJobHandler.CreateCronJob)
-		cronJobRoutes.PUT("/:id", cronJobHandler.UpdateCronJob)
-		cronJobRoutes.DELETE("/:id", cronJobHandler.DeleteCronJob)
-		cronJobRoutes.POST("/:id/run", cronJobHandler.RunCronJob)
 	}
 
 	// 配置路由

@@ -50,8 +50,8 @@
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="port">端口号 *</label>
-                                <input type="text" id="port" placeholder="例如：22, 80, 443, 8000-8080, ALL" required>
-                                <small>支持单个端口或端口范围</small>
+                                <input type="text" id="port" placeholder="例如：22, 80, 443, 8000-8080, 22,80,443, ALL" required>
+                                <small>支持单个端口、端口范围或英文逗号分隔的多个端口（自动创建多条规则）</small>
                             </div>
                             <div class="form-group">
                                 <label for="protocol">协议类型 *</label>
@@ -91,6 +91,7 @@
                                     <th>当前IP</th>
                                     <th>状态</th>
                                     <th>最后更新</th>
+                                    <th>下次更新</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
@@ -122,8 +123,8 @@
                                 <input type="text" id="cloud-region" placeholder="例如：ap-beijing" required>
                             </div>
                             <div class="form-group">
-                                <label for="instance-id">实例ID</label>
-                                <input type="text" id="instance-id" placeholder="云服务器实例ID">
+                                <label for="instance-id">实例ID/安全组ID</label>
+                                <input type="text" id="instance-id" placeholder="云服务器实例ID/安全组ID">
                             </div>
                         </div>
                         <div class="form-row">
@@ -221,7 +222,7 @@
                                 <h5>当前状态</h5>
                                 <p>IP检查间隔: <span id="currentInterval">30分钟</span></p>
                                 <p>定时任务状态: <span id="currentStatus" class="status-badge status-disabled">禁用</span></p>
-                                <p>下次检查时间: <span id="nextCheck">已禁用</span></p>
+                                <!-- <p>下次检查时间: <span id="nextCheck">已禁用</span></p> -->
                                 <p>当前公网IP: <span id="currentIP">获取中...</span></p>
                                 <div style="margin-top: 15px;">
                                     <button type="button" class="btn btn-secondary"

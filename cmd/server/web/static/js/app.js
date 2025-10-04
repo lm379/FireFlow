@@ -5,7 +5,7 @@ let currentEditType = null;
 // 云服务商中文映射
 const providerNames = {
     'TencentCloud': '腾讯云',
-    'Aliyun': '阿里云（暂未支持）',
+    'Aliyun': '阿里云',
     'AWS': '亚马逊云（暂未支持）',
     'HuaweiCloud': '华为云（暂未支持）',
 };
@@ -27,7 +27,7 @@ function switchTab(tabName, targetElement = null) {
 
     // 显示选中的标签页
     document.getElementById(`${tabName}-tab`).classList.add('active');
-    
+
     // 激活对应的导航标签
     if (targetElement) {
         targetElement.classList.add('active');
@@ -46,7 +46,7 @@ function switchTab(tabName, targetElement = null) {
     }
 
     // 加载对应数据
-    switch(tabName) {
+    switch (tabName) {
         case 'rules':
             fetchRules();
             break;
@@ -74,7 +74,7 @@ function showMessage(message, type = 'success') {
     const messageElement = document.createElement('div');
     const messageClass = type === 'success' ? 'message-success' : 'message-error';
     messageElement.className = `message ${messageClass}`;
-    
+
     // 添加图标和文本
     const icon = type === 'success' ? '✓' : '✗';
     messageElement.innerHTML = `
@@ -101,7 +101,7 @@ function showMessage(message, type = 'success') {
 function closeMessage(element) {
     const messageElement = element.tagName === 'SPAN' ? element.parentElement : element;
     messageElement.classList.add('message-hide');
-    
+
     setTimeout(() => {
         if (messageElement.parentElement) {
             messageElement.parentElement.removeChild(messageElement);
@@ -128,15 +128,32 @@ async function apiRequest(url, options = {}) {
             },
             ...options
         });
-        
+
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            // 尝试解析服务器返回的错误信息
+            let errorMessage = `HTTP error! status: ${response.status}`;
+            try {
+                const errorData = await response.json();
+                if (errorData.error) {
+                    errorMessage = errorData.error;
+                }
+            } catch (parseError) {
+                // 如果解析失败，使用默认错误信息
+            }
+            
+            const error = new Error(errorMessage);
+            error.status = response.status;
+            throw error;
         }
-        
+
         return await response.json();
     } catch (error) {
         console.error('API请求错误:', error);
-        showMessage(`请求失败: ${error.message}`, 'error');
+        
+        // 对于某些错误，不显示通用的失败消息，让调用方处理
+        if (error.status !== 409) {
+            showMessage(`请求失败: ${error.message}`, 'error');
+        }
         throw error;
     }
 }
@@ -148,12 +165,20 @@ async function fetchRules() {
         const rules = await apiRequest('/api/v1/rules/');
         const tableBody = document.querySelector('#rulesTable tbody');
         tableBody.innerHTML = '';
-        
+
         (rules || []).forEach(rule => {
-            const statusBadge = rule.enabled ? 
-                '<span class="status-badge status-enabled">启用</span>' : 
-                '<span class="status-badge status-disabled">禁用</span>';
-            
+            const statusBadge = rule.enabled ?
+                `<span class="status-badge status-enabled clickable" onclick="toggleRuleStatus(${rule.ID})" title="点击禁用">启用</span>` :
+                `<span class="status-badge status-disabled clickable" onclick="toggleRuleStatus(${rule.ID})" title="点击启用">禁用</span>`;
+
+            // 计算下次更新时间
+            let nextUpdateTime = '未设置';
+            if (rule.enabled && rule.UpdatedAt) {
+                nextUpdateTime = calculateNextUpdateTime(rule.UpdatedAt);
+            } else if (rule.enabled) {
+                nextUpdateTime = '即将开始';
+            }
+
             const row = `
                 <tr>
                     <td>
@@ -174,11 +199,12 @@ async function fetchRules() {
                     <td>${rule.last_ip || '未设置'}</td>
                     <td>${statusBadge}</td>
                     <td>${rule.UpdatedAt ? new Date(rule.UpdatedAt).toLocaleString() : ''}</td>
+                    <td>${nextUpdateTime}</td>
                 </tr>
             `;
             tableBody.insertAdjacentHTML('beforeend', row);
         });
-        
+
         // 加载完规则后，加载云服务配置选项
         await loadCloudConfigOptions();
     } catch (error) {
@@ -190,9 +216,9 @@ async function fetchRules() {
 function confirmRuleAction(ruleId) {
     const selectElement = document.querySelector(`select[data-rule-id="${ruleId}"]`);
     const action = selectElement.value;
-    
+
     // 执行对应操作
-    switch(action) {
+    switch (action) {
         case 'execute':
             executeRule(ruleId);
             break;
@@ -203,7 +229,7 @@ function confirmRuleAction(ruleId) {
             deleteRule(ruleId);
             break;
     }
-    
+
     // 操作完成后重置为默认值（执行）
     setTimeout(() => {
         selectElement.value = 'execute';
@@ -214,30 +240,46 @@ async function addRule(event) {
     event.preventDefault();
     const form = event.target;
     setLoading(form);
-    
+
     try {
         const cloudConfigId = document.getElementById('cloudConfigId').value;
         if (!cloudConfigId) {
             throw new Error('请选择云服务配置');
         }
-        
+
         const remark = document.getElementById('remark').value.trim();
         if (!remark) {
             throw new Error('备注为必填项');
         }
-        
+
         const protocol = document.getElementById('protocol').value;
         let port = document.getElementById('port').value;
-        
+
         // 如果协议是ICMP或ALL，强制端口为ALL
         if (protocol === 'ICMP' || protocol === 'ALL') {
-            port = 'ALL';
+            // 腾讯云
+            if (cloudConfigId === 'tencent') {
+                port = 'ALL';
+            }
+            // 阿里云
+            if (cloudConfigId === 'aliyun') {
+                port = '-1/-1';
+            }
         }
+
+        // 检查是否包含逗号分隔的多个端口
+        const ports = port.includes(',') ? port.split(',').map(p => p.trim()).filter(p => p) : [port];
         
+        if (ports.length > 1) {
+            // 多端口处理：为每个端口创建单独的规则
+            await handleMultiplePortRules(ports, remark, cloudConfigId, protocol, form);
+            return;
+        }
+
         const rule = {
             remark: remark,
             cloud_config_id: parseInt(cloudConfigId),
-            port: port,
+            port: ports[0],
             protocol: protocol,
             enabled: document.getElementById('enabled').value === 'true',
         };
@@ -245,13 +287,13 @@ async function addRule(event) {
         // 检查是否为编辑模式
         const editId = form.dataset.editId;
         const isEdit = form.dataset.currentAction === 'edit' && editId;
-        
+
         let response;
         if (isEdit) {
             // 编辑模式：获取完整的规则数据并更新
             const rules = await apiRequest('/api/v1/rules/');
             const existingRule = rules.find(r => r.ID == editId);
-            
+
             if (existingRule) {
                 // 合并现有数据和更新数据，保留云服务配置相关字段
                 const completeRule = {
@@ -259,7 +301,7 @@ async function addRule(event) {
                     ...rule,
                     ID: parseInt(editId), // 确保ID正确
                 };
-                
+
                 response = await apiRequest(`/api/v1/rules/${editId}`, {
                     method: 'PUT',
                     body: JSON.stringify(completeRule)
@@ -267,9 +309,9 @@ async function addRule(event) {
             } else {
                 throw new Error('规则不存在');
             }
-            
+
             showMessage('规则更新成功！');
-            
+
             // 退出编辑模式
             cancelEditRule();
         } else {
@@ -278,16 +320,16 @@ async function addRule(event) {
                 method: 'POST',
                 body: JSON.stringify(rule)
             });
-            
+
             form.reset();
             // 重置后恢复端口输入框状态
             document.getElementById('port').disabled = false;
             document.getElementById('port').style.backgroundColor = '';
             document.getElementById('port').style.cursor = '';
-            
+
             showMessage('规则添加成功！');
         }
-        
+
         // 添加小延时后刷新数据，确保后端数据同步
         setTimeout(() => {
             fetchRules();
@@ -299,9 +341,65 @@ async function addRule(event) {
     }
 }
 
+// 处理多端口规则创建
+async function handleMultiplePortRules(ports, remark, cloudConfigId, protocol, form) {
+    const enabled = document.getElementById('enabled').value === 'true';
+    let successCount = 0;
+    let failedPorts = [];
+
+    // 显示处理进度
+    showMessage(`开始创建 ${ports.length} 条规则...`, 'success');
+
+    for (let i = 0; i < ports.length; i++) {
+        const port = ports[i];
+        
+        try {
+            // 为每个端口创建规则，备注中包含端口信息
+            const rule = {
+                remark: `${remark} (端口: ${port})`,
+                cloud_config_id: parseInt(cloudConfigId),
+                port: port,
+                protocol: protocol,
+                enabled: enabled,
+            };
+
+            await apiRequest('/api/v1/rules/', {
+                method: 'POST',
+                body: JSON.stringify(rule)
+            });
+
+            successCount++;
+            
+            // 显示进度
+            showMessage(`已创建 ${successCount}/${ports.length} 条规则 (端口: ${port})`, 'success');
+            
+        } catch (error) {
+            console.error(`创建端口 ${port} 的规则失败:`, error);
+            failedPorts.push(port);
+        }
+    }
+
+    // 显示最终结果
+    if (failedPorts.length === 0) {
+        showMessage(`所有 ${successCount} 条规则创建成功！`, 'success');
+        form.reset();
+        // 重置后恢复端口输入框状态
+        document.getElementById('port').disabled = false;
+        document.getElementById('port').style.backgroundColor = '';
+        document.getElementById('port').style.cursor = '';
+    } else {
+        showMessage(`创建完成：成功 ${successCount} 条，失败 ${failedPorts.length} 条 (端口: ${failedPorts.join(', ')})`, 'error');
+    }
+
+    // 刷新规则列表
+    setTimeout(() => {
+        fetchRules();
+    }, 500);
+}
+
 async function deleteRule(id) {
     if (!confirm('确定要删除这条规则吗？')) return;
-    
+
     try {
         await apiRequest(`/api/v1/rules/${id}`, { method: 'DELETE' });
         fetchRules();
@@ -313,7 +411,7 @@ async function deleteRule(id) {
 
 async function executeRule(id) {
     if (!confirm('确定要立即执行这条规则吗？')) return;
-    
+
     try {
         await apiRequest(`/api/v1/rules/${id}/execute`, { method: 'POST' });
         fetchRules();
@@ -328,36 +426,36 @@ async function editRule(id) {
         // 获取规则详情
         const rules = await apiRequest('/api/v1/rules/');
         const rule = rules.find(r => r.ID === id);
-        
+
         if (!rule) {
             showMessage('规则不存在', 'error');
             return;
         }
-        
+
         // 确保云服务配置选项已加载
         await loadCloudConfigOptions();
-        
+
         // 填充表单
         document.getElementById('remark').value = rule.remark || '';
         document.getElementById('cloudConfigId').value = rule.cloud_config_id || '';
         document.getElementById('port').value = rule.port || '';
         document.getElementById('protocol').value = rule.protocol || 'TCP';
         document.getElementById('enabled').value = rule.enabled ? 'true' : 'false';
-        
+
         // 更新表单状态为编辑模式
         const form = document.getElementById('addRuleForm');
         const submitButton = form.querySelector('button[type="submit"]');
-        
+
         // 保存原始表单状态以便取消编辑
         if (!form.dataset.originalAction) {
             form.dataset.originalAction = 'add';
         }
-        
+
         // 设置编辑模式
         form.dataset.editId = id;
         form.dataset.currentAction = 'edit';
         submitButton.textContent = '更新规则';
-        
+
         // 添加取消编辑按钮
         let cancelButton = form.querySelector('.cancel-edit-btn');
         if (!cancelButton) {
@@ -368,7 +466,7 @@ async function editRule(id) {
             cancelButton.onclick = cancelEditRule;
             submitButton.parentNode.insertBefore(cancelButton, submitButton.nextSibling);
         }
-        
+
         // 滚动到表单区域
         form.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -384,20 +482,20 @@ function cancelEditRule() {
     const form = document.getElementById('addRuleForm');
     const submitButton = form.querySelector('button[type="submit"]');
     const cancelButton = form.querySelector('.cancel-edit-btn');
-    
+
     // 清空表单
     form.reset();
-    
+
     // 恢复新增模式
     delete form.dataset.editId;
     form.dataset.currentAction = 'add';
     submitButton.textContent = '添加规则';
-    
+
     // 移除取消按钮
     if (cancelButton) {
         cancelButton.remove();
     }
-    
+
     // showMessage('已取消编辑，表单恢复为新增模式');
 }
 
@@ -408,16 +506,16 @@ async function fetchCloudConfigs() {
         const configs = await apiRequest('/api/v1/cloud-configs/');
         const tableBody = document.querySelector('#cloudConfigTable tbody');
         tableBody.innerHTML = '';
-        
+
         (configs || []).forEach(config => {
-            const statusBadge = config.is_enabled ? 
-                '<span class="status-badge status-enabled">启用</span>' : 
-                '<span class="status-badge status-disabled">禁用</span>';
-                
-            const defaultBadge = config.is_default ? 
-                '<span class="status-badge status-enabled">是</span>' : 
+            const statusBadge = config.is_enabled ?
+                `<span class="status-badge status-enabled clickable" onclick="toggleCloudConfigStatus(${config.ID})" title="点击禁用">启用</span>` :
+                `<span class="status-badge status-disabled clickable" onclick="toggleCloudConfigStatus(${config.ID})" title="点击启用">禁用</span>`;
+
+            const defaultBadge = config.is_default ?
+                '<span class="status-badge status-enabled">是</span>' :
                 '<span class="status-badge status-disabled">否</span>';
-            
+
             const row = `
                 <tr>
                     <td>
@@ -451,9 +549,9 @@ async function fetchCloudConfigs() {
 function confirmCloudConfigAction(configId) {
     const selectElement = document.querySelector(`select[data-config-id="${configId}"]`);
     const action = selectElement.value;
-    
+
     // 执行对应操作
-    switch(action) {
+    switch (action) {
         case 'test':
             testCloudConfig(configId);
             break;
@@ -464,7 +562,7 @@ function confirmCloudConfigAction(configId) {
             deleteCloudConfig(configId);
             break;
     }
-    
+
     // 操作完成后重置为默认值（测试）
     setTimeout(() => {
         selectElement.value = 'test';
@@ -476,18 +574,18 @@ async function loadCloudConfigOptions() {
     try {
         const configs = await apiRequest('/api/v1/cloud-configs/');
         const select = document.getElementById('cloudConfigId');
-        
+
         // 清空现有选项，保留默认选项
         select.innerHTML = '<option value="">请选择已配置的云服务</option>';
-        
+
         // 只显示启用的配置
         const enabledConfigs = (configs || []).filter(config => config.is_enabled);
-        
+
         if (enabledConfigs.length === 0) {
             select.innerHTML = '<option value="">请先在云服务配置中添加配置</option>';
             return;
         }
-        
+
         enabledConfigs.forEach(config => {
             const option = document.createElement('option');
             option.value = config.ID;
@@ -503,7 +601,7 @@ async function addCloudConfig(event) {
     event.preventDefault();
     const form = event.target;
     setLoading(form);
-    
+
     try {
         const config = {
             provider: document.getElementById('cloud-provider').value,
@@ -519,21 +617,21 @@ async function addCloudConfig(event) {
         // 检查是否为编辑模式
         const editId = form.dataset.editId;
         const isEdit = form.dataset.currentAction === 'edit' && editId;
-        
+
         if (isEdit) {
             // 编辑模式：更新配置
             // 如果密码为空，则不更新密码字段
             if (!config.secret_key.trim()) {
                 delete config.secret_key;
             }
-            
+
             await apiRequest(`/api/v1/cloud-configs/${editId}`, {
                 method: 'PUT',
                 body: JSON.stringify(config)
             });
-            
+
             showMessage('云服务配置更新成功！');
-            
+
             // 退出编辑模式
             cancelEditCloudConfig();
         } else {
@@ -542,11 +640,11 @@ async function addCloudConfig(event) {
                 method: 'POST',
                 body: JSON.stringify(config)
             });
-            
+
             form.reset();
             showMessage('云服务配置添加成功！');
         }
-        
+
         fetchCloudConfigs();
     } catch (error) {
         showMessage(error.message || (form.dataset.currentAction === 'edit' ? '更新云服务配置失败' : '添加云服务配置失败'), 'error');
@@ -557,25 +655,30 @@ async function addCloudConfig(event) {
 
 async function deleteCloudConfig(id) {
     if (!confirm('确定要删除这个云服务配置吗？')) return;
-    
+
     try {
         await apiRequest(`/api/v1/cloud-configs/${id}`, { method: 'DELETE' });
         fetchCloudConfigs();
         showMessage('云服务配置删除成功！');
     } catch (error) {
-        showMessage('删除云服务配置失败', 'error');
+        // 检查是否是外键约束错误
+        if (error.status === 409) {
+            showMessage(error.message, 'error');
+        } else {
+            showMessage('删除云服务配置失败', 'error');
+        }
     }
 }
 
 async function testCloudConfig(id) {
     try {
         const result = await apiRequest(`/api/v1/cloud-configs/${id}/test`, { method: 'POST' });
-        
+
         let message = result.message;
         if (result.success && result.instance_exists && result.instance_ip) {
             message += `\n实例IP地址: ${result.instance_ip}`;
         }
-        
+
         showMessage(message, result.success ? 'success' : 'error');
     } catch (error) {
         showMessage('连接测试失败', 'error');
@@ -587,12 +690,12 @@ async function editCloudConfig(id) {
         // 获取配置详情
         const configs = await apiRequest('/api/v1/cloud-configs/');
         const config = configs.find(c => c.ID === id);
-        
+
         if (!config) {
             showMessage('配置不存在', 'error');
             return;
         }
-        
+
         // 填充云服务配置表单
         document.getElementById('cloud-provider').value = config.provider || '';
         document.getElementById('cloud-region').value = config.region || '';
@@ -602,24 +705,24 @@ async function editCloudConfig(id) {
         document.getElementById('cloud-description').value = config.description || '';
         document.getElementById('is-default').value = config.is_default ? 'true' : 'false';
         document.getElementById('cloud-enabled').value = config.is_enabled ? 'true' : 'false';
-        
+
         // 切换到云服务配置标签
         switchTab('cloud-config');
-        
+
         // 更新表单状态为编辑模式
         const form = document.getElementById('addCloudConfigForm');
         const submitButton = form.querySelector('button[type="submit"]');
-        
+
         // 保存原始表单状态
         if (!form.dataset.originalAction) {
             form.dataset.originalAction = 'add';
         }
-        
+
         // 设置编辑模式
         form.dataset.editId = id;
         form.dataset.currentAction = 'edit';
         submitButton.textContent = '更新配置';
-        
+
         // 添加取消编辑按钮
         let cancelButton = form.querySelector('.cancel-edit-btn');
         if (!cancelButton) {
@@ -630,12 +733,12 @@ async function editCloudConfig(id) {
             cancelButton.onclick = cancelEditCloudConfig;
             submitButton.parentNode.insertBefore(cancelButton, submitButton.nextSibling);
         }
-        
+
         // 滚动到表单区域
         form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        
+
         showMessage('加载配置成功');
-        
+
     } catch (error) {
         console.error('获取配置详情失败:', error);
         showMessage('获取配置详情失败', 'error');
@@ -646,20 +749,20 @@ function cancelEditCloudConfig() {
     const form = document.getElementById('addCloudConfigForm');
     const submitButton = form.querySelector('button[type="submit"]');
     const cancelButton = form.querySelector('.cancel-edit-btn');
-    
+
     // 清空表单
     form.reset();
-    
+
     // 恢复新增模式
     delete form.dataset.editId;
     form.dataset.currentAction = 'add';
     submitButton.textContent = '保存配置';
-    
+
     // 移除取消按钮
     if (cancelButton) {
         cancelButton.remove();
     }
-    
+
     // showMessage('已取消编辑，表单恢复为新增模式');
 }
 
@@ -668,25 +771,25 @@ function cancelEditCloudConfig() {
 async function fetchSystemConfig() {
     try {
         const config = await apiRequest('/api/v1/system-config/');
-        
+
         // IP获取设置
         if (config.ip_fetch_url) {
             document.getElementById('ip-fetch-url').value = config.ip_fetch_url;
         }
-        
+
         // 定时任务设置
         if (config.ip_check_interval) {
             document.getElementById('ip-check-interval').value = config.ip_check_interval;
             document.getElementById('currentInterval').textContent = config.ip_check_interval + '分钟';
         }
-        
+
         if (config.cron_enabled !== undefined) {
             document.getElementById('cron-enabled').value = config.cron_enabled;
             const statusEl = document.getElementById('currentStatus');
             statusEl.textContent = config.cron_enabled === 'true' ? '启用' : '禁用';
             statusEl.className = config.cron_enabled === 'true' ? 'status-badge status-enabled' : 'status-badge status-disabled';
         }
-        
+
         // 计算下次检查时间
         if (config.ip_check_interval && config.cron_enabled === 'true') {
             const nextCheck = new Date();
@@ -695,7 +798,7 @@ async function fetchSystemConfig() {
         } else {
             document.getElementById('nextCheck').textContent = '已禁用';
         }
-        
+
         // 获取当前IP
         fetchCurrentIP();
     } catch (error) {
@@ -707,7 +810,7 @@ async function saveSystemConfig(event) {
     event.preventDefault();
     const form = event.target;
     setLoading(form);
-    
+
     try {
         const config = {
             ip_fetch_url: document.getElementById('ip-fetch-url').value,
@@ -719,7 +822,7 @@ async function saveSystemConfig(event) {
             method: 'PUT',
             body: JSON.stringify(config)
         });
-        
+
         fetchSystemConfig(); // 刷新显示
         showMessage('系统设置保存成功！');
     } catch (error) {
@@ -747,31 +850,31 @@ function closeModal() {
 async function syncIPNow() {
     const button = event.target;
     const originalText = button.textContent;
-    
+
     try {
         button.textContent = '同步中...';
         button.disabled = true;
-        
+
         const response = await fetch('/api/v1/sync-ip/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             }
         });
-        
+
         if (!response.ok) {
             throw new Error('同步失败');
         }
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             document.getElementById('currentIP').textContent = result.current_ip;
             showMessage(`IP同步成功！当前IP: ${result.current_ip}，已更新 ${result.updated_rules} 条规则`);
         } else {
             throw new Error(result.message || '同步失败');
         }
-        
+
     } catch (error) {
         console.error('IP同步失败:', error);
         showMessage('IP同步失败: ' + error.message, 'error');
@@ -796,7 +899,7 @@ async function fetchCurrentIP() {
 }
 
 // 点击模态框外部关闭
-window.onclick = function(event) {
+window.onclick = function (event) {
     const modal = document.getElementById('editModal');
     if (event.target === modal) {
         closeModal();
@@ -805,17 +908,17 @@ window.onclick = function(event) {
 
 // ============= 事件绑定 =============
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // 绑定表单事件
     document.getElementById('addRuleForm').addEventListener('submit', addRule);
     document.getElementById('addCloudConfigForm').addEventListener('submit', addCloudConfig);
     document.getElementById('systemConfigForm').addEventListener('submit', saveSystemConfig);
-    
+
     // 协议选择变化时的处理逻辑
-    document.getElementById('protocol').addEventListener('change', function() {
+    document.getElementById('protocol').addEventListener('change', function () {
         const protocolSelect = this;
         const portInput = document.getElementById('port');
-        
+
         if (protocolSelect.value === 'ICMP' || protocolSelect.value === 'ALL') {
             // 当协议为ICMP或ALL时，端口自动设为ALL并禁用输入
             portInput.value = 'ALL';
@@ -832,7 +935,150 @@ document.addEventListener('DOMContentLoaded', function() {
             portInput.style.cursor = '';
         }
     });
-    
-    // 初始加载防火墙规则
+
+    // 端口输入框实时验证和提示
+    document.getElementById('port').addEventListener('input', function () {
+        const portInput = this;
+        const portValue = portInput.value.trim();
+        
+        // 移除之前的提示
+        const existingTip = portInput.parentNode.querySelector('.port-tip');
+        if (existingTip) {
+            existingTip.remove();
+        }
+
+        if (portValue.includes(',')) {
+            const ports = portValue.split(',').map(p => p.trim()).filter(p => p);
+            if (ports.length > 1) {
+                const tip = document.createElement('div');
+                tip.className = 'port-tip';
+                tip.style.cssText = 'color: #007bff; font-size: 12px; margin-top: 4px;';
+                tip.textContent = `将创建 ${ports.length} 条规则，每个端口一条规则`;
+                portInput.parentNode.appendChild(tip);
+            }
+        }
+    });
+
+    // 初始加载防火墙规则和系统配置
+    loadSystemConfig();
     fetchRules();
 });
+
+// 计算下次更新时间
+function calculateNextUpdateTime(lastUpdatedAt) {
+    if (!lastUpdatedAt) {
+        return '未设置';
+    }
+
+    if (window.systemConfig && window.systemConfig.cron_enabled === 'false') {
+        return '定时任务已禁用';
+    }
+
+    try {
+        const lastUpdate = new Date(lastUpdatedAt);
+        if (isNaN(lastUpdate.getTime())) {
+            return '时间格式错误';
+        }
+
+        // 从全局配置获取间隔时间，默认5分钟
+        const intervalMinutes = window.systemConfig && window.systemConfig.ip_check_interval ?
+            parseInt(window.systemConfig.ip_check_interval) : 5;
+
+        const nextUpdate = new Date(lastUpdate.getTime() + intervalMinutes * 60 * 1000);
+        const now = new Date();
+
+        if (nextUpdate <= now) {
+            return '即将更新';
+        }
+
+        return nextUpdate.toLocaleString();
+    } catch (error) {
+        console.error('计算下次更新时间失败:', error);
+        return '计算失败';
+    }
+}
+
+// 加载系统配置到全局变量
+window.systemConfig = {};
+async function loadSystemConfig() {
+    try {
+        const response = await fetch('/api/v1/system-config/', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            const configs = await response.json();
+            // 后端返回的是对象格式，直接赋值
+            if (configs && typeof configs === 'object') {
+                window.systemConfig = configs;
+                // console.log('系统配置加载成功:', window.systemConfig);
+            }
+        }
+    } catch (error) {
+        console.error('加载系统配置失败:', error);
+    }
+}
+
+// 切换云服务配置启用/禁用状态
+async function toggleCloudConfigStatus(id) {
+    try {
+        // 先获取当前配置详情
+        const config = await apiRequest(`/api/v1/cloud-configs/${id}`);
+        
+        if (!config) {
+            showMessage('配置不存在', 'error');
+            return;
+        }
+
+        // 切换状态
+        const newStatus = !config.is_enabled;
+        const updateData = {
+            ...config,
+            is_enabled: newStatus
+        };
+
+        await apiRequest(`/api/v1/cloud-configs/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(updateData)
+        });
+
+        fetchCloudConfigs();
+        loadCloudConfigOptions(); // 重新加载选择列表
+        showMessage(`云服务配置已${newStatus ? '启用' : '禁用'}！`);
+    } catch (error) {
+        showMessage('状态切换失败', 'error');
+    }
+}
+
+// 切换防火墙规则启用/禁用状态
+async function toggleRuleStatus(id) {
+    try {
+        // 先获取当前规则详情
+        const rule = await apiRequest(`/api/v1/rules/${id}`);
+        
+        if (!rule) {
+            showMessage('规则不存在', 'error');
+            return;
+        }
+
+        // 切换状态
+        const newStatus = !rule.enabled;
+        const updateData = {
+            ...rule,
+            enabled: newStatus
+        };
+
+        await apiRequest(`/api/v1/rules/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(updateData)
+        });
+
+        fetchRules();
+        showMessage(`防火墙规则已${newStatus ? '启用' : '禁用'}！`);
+    } catch (error) {
+        showMessage('状态切换失败', 'error');
+    }
+}

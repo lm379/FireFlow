@@ -39,23 +39,8 @@ type ConfigService interface {
 	DeleteCloudConfig(id uint) error
 	TestCloudConfig(id uint) (*CloudTestResult, error)
 
-	// 定时任务配置管理
-	GetCronConfig(jobName string) (*model.CronJobConfig, error)
-	SetCronConfig(config *model.CronJobConfig) error
-	ListCronConfigs() ([]model.CronJobConfig, error)
-	EnableCronJob(jobName string) error
-	DisableCronJob(jobName string) error
-
-	// 新增：前端定时任务管理
-	GetAllCronJobs() ([]model.CronJobConfig, error)
-	CreateCronJob(config *model.CronJobConfig) error
-	UpdateCronJob(config *model.CronJobConfig) error
-	DeleteCronJob(id uint) error
-	RunCronJob(id uint) error
-
 	// 数据迁移相关（从config.yaml迁移到数据库）
 	MigrateCloudConfigFromYAML(yamlConfig map[string]interface{}) error
-	MigrateCronConfigFromYAML(yamlConfig map[string]interface{}) error
 }
 
 type configService struct {
@@ -137,6 +122,14 @@ func (s *configService) UpdateCloudConfig(config *model.CloudProviderConfig) err
 }
 
 func (s *configService) DeleteCloudConfig(id uint) error {
+	// 检查是否存在关联的防火墙规则
+	hasRules, err := s.configRepo.HasAssociatedRules(id)
+	if err != nil {
+		return fmt.Errorf("检查关联规则失败: %v", err)
+	}
+	if hasRules {
+		return fmt.Errorf("无法删除云服务配置，存在关联的防火墙规则。请先删除相关规则再进行操作")
+	}
 	return s.configRepo.DeleteCloudProviderConfig(id)
 }
 
@@ -222,57 +215,48 @@ func (s *configService) testTencentInstance(config *model.CloudProviderConfig) (
 }
 
 func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*CloudTestResult, error) {
-	// TODO: 调用阿里云API检查实例
+	// 构造阿里云配置
+	aliyunConfig := cloud.AliyunConfig{
+		AccessKeyID:      config.SecretId,
+		AccessKeySecret:  config.SecretKey,
+		RegionID:         config.Region,
+		SecurityGroupIds: config.InstanceId, // 这里存的是安全组ID
+	}
+
+	client, err := cloud.NewAliyunClient(aliyunConfig)
+	if err != nil {
+		return &CloudTestResult{
+			Success:        false,
+			Message:        fmt.Sprintf("创建阿里云客户端失败: %v", err),
+			InstanceExists: false,
+		}, err
+	}
+
+	if config.InstanceId == "" {
+		return &CloudTestResult{
+			Success:        true,
+			Message:        "阿里云凭证验证成功，但未配置安全组ID",
+			InstanceExists: false,
+		}, nil
+	}
+
+	// 验证安全组是否存在
+	sgInfo, err := client.ValidateSecurityGroup(config.InstanceId)
+	if err != nil {
+		return &CloudTestResult{
+			Success:        false,
+			Message:        fmt.Sprintf("安全组验证失败: %v", err),
+			InstanceExists: false,
+		}, err
+	}
+
+	message := fmt.Sprintf("安全组验证成功，名称: %s，描述: %s，规则数量: %d", sgInfo.Name, sgInfo.Description, sgInfo.RulesCount)
 	return &CloudTestResult{
 		Success:        true,
-		Message:        "实例检查成功",
+		Message:        message,
 		InstanceExists: true,
-		InstanceIP:     "5.6.7.8", // 这里应该是实际获取的IP
+		InstanceIP:     "", // 安全组没有IP地址
 	}, nil
-}
-
-// 定时任务配置管理
-func (s *configService) GetCronConfig(jobName string) (*model.CronJobConfig, error) {
-	return s.configRepo.GetCronJobConfig(jobName)
-}
-
-func (s *configService) SetCronConfig(config *model.CronJobConfig) error {
-	return s.configRepo.SetCronJobConfig(config)
-}
-
-func (s *configService) ListCronConfigs() ([]model.CronJobConfig, error) {
-	return s.configRepo.ListCronJobs()
-}
-
-func (s *configService) EnableCronJob(jobName string) error {
-	return s.configRepo.UpdateCronJobStatus(jobName, true)
-}
-
-func (s *configService) DisableCronJob(jobName string) error {
-	return s.configRepo.UpdateCronJobStatus(jobName, false)
-}
-
-// 新增：前端定时任务管理
-func (s *configService) GetAllCronJobs() ([]model.CronJobConfig, error) {
-	return s.configRepo.ListCronJobs()
-}
-
-func (s *configService) CreateCronJob(config *model.CronJobConfig) error {
-	return s.configRepo.SetCronJobConfig(config)
-}
-
-func (s *configService) UpdateCronJob(config *model.CronJobConfig) error {
-	return s.configRepo.UpdateCronJobConfig(config)
-}
-
-func (s *configService) DeleteCronJob(id uint) error {
-	return s.configRepo.DeleteCronJobConfig(id)
-}
-
-func (s *configService) RunCronJob(id uint) error {
-	// TODO: 实现立即执行定时任务
-	// 这里应该调用相应的任务执行器
-	return nil
 }
 
 // 数据迁移相关
@@ -316,40 +300,6 @@ func (s *configService) MigrateCloudConfigFromYAML(yamlConfig map[string]interfa
 
 		if err := s.configRepo.SetCloudProviderConfig(config); err != nil {
 			return fmt.Errorf("failed to migrate cloud config for %s: %v", provider, err)
-		}
-	}
-
-	return nil
-}
-
-func (s *configService) MigrateCronConfigFromYAML(yamlConfig map[string]interface{}) error {
-	cronConfig, ok := yamlConfig["cron"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("cron config not found in yaml")
-	}
-
-	// 遍历每个定时任务配置
-	for jobName, configData := range cronConfig {
-		configMap, ok := configData.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		schedule := getStringFromMap(configMap, "schedule")
-		enabled := getBoolFromMap(configMap, "enabled")
-		description := getStringFromMap(configMap, "description")
-
-		// 其他配置暂时不存储，后续可根据需要扩展
-
-		config := &model.CronJobConfig{
-			JobName:     jobName,
-			CronExpr:    schedule,
-			IsEnabled:   enabled,
-			Description: description,
-		}
-
-		if err := s.configRepo.SetCronJobConfig(config); err != nil {
-			return fmt.Errorf("failed to migrate cron config for %s: %v", jobName, err)
 		}
 	}
 

@@ -433,6 +433,16 @@ tr:hover {
     color: #721c24;
 }
 
+.status-badge.clickable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.status-badge.clickable:hover {
+    opacity: 0.8;
+    transform: scale(1.05);
+}
+
 .modal {
     display: none;
     position: fixed;
