@@ -197,7 +197,6 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.runtime
-          platforms: linux/${{ matrix.goarch }}
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-${{ matrix.goarch }}
@@ -246,3 +245,10 @@ jobs:
           echo ""
           echo "🏗️  Supports architectures: linux/amd64, linux/arm64"
           echo "💡 Docker will automatically pull the correct architecture"
+
+      - name: Clean up temporary arch tags
+        run: |
+          docker buildx imagetools remove ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-amd64 || true
+          docker buildx imagetools remove ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-arm64 || true
+          docker buildx imagetools remove ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-amd64 || true
+          docker buildx imagetools remove ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-arm64 || true
