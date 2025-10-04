@@ -181,10 +181,10 @@ jobs:
           ENV GIN_MODE=release
           
           # Copy the binary
-          COPY fireflow-${{ matrix.goos }}-${{ matrix.goarch }} ./fireflow
+          COPY fireflow-${{ matrix.goos }}-${{ matrix.goarch }} /app/fireflow
           
           # Make binary executable
-          RUN chmod +x ./fireflow
+          RUN chmod +x /app/fireflow
           
           EXPOSE 9686
           
@@ -200,8 +200,8 @@ jobs:
           platforms: linux/${{ matrix.goarch }}
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}
-            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-${{ matrix.goarch }}
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-${{ matrix.goarch }}
           labels: |
             org.opencontainers.image.title=FireFlow
             org.opencontainers.image.description=Dynamic Firewall Rule Management
@@ -211,3 +211,38 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT
 
+  # Create multi-arch Docker manifest
+  create-manifest:
+    needs: build-and-upload
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          # Create manifest for versioned tag
+          docker manifest create ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }} \
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-amd64 \
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}-arm64
+          
+          docker manifest push ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}
+          
+          # Create manifest for latest tag
+          docker manifest create ${{ secrets.DOCKER_USERNAME }}/fireflow:latest \
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-amd64 \
+            ${{ secrets.DOCKER_USERNAME }}/fireflow:latest-arm64
+          
+          docker manifest push ${{ secrets.DOCKER_USERNAME }}/fireflow:latest
+          
+          echo "✅ Multi-arch Docker images published successfully"
+          echo ""
+          echo "📦 Available for users:"
+          echo "  docker pull ${{ secrets.DOCKER_USERNAME }}/fireflow:${{ github.ref_name }}"
+          echo "  docker pull ${{ secrets.DOCKER_USERNAME }}/fireflow:latest"
+          echo ""
+          echo "🏗️  Supports architectures: linux/amd64, linux/arm64"
+          echo "💡 Docker will automatically pull the correct architecture"
