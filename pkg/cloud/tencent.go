@@ -402,12 +402,14 @@ func (tc *TencentClient) updateLighthouseFirewallRule(instanceID, ruleID string,
 			ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
 	}
 
-	// 构建新的CIDR块
-	newCidrBlock := fmt.Sprintf("%s/32", newIP) // 如果IP已经是最新的，就不需要更新
+	// 构建新的CIDR块并检查是否需要更新
+	newCidrBlock := fmt.Sprintf("%s/32", newIP)
 	if targetRule.CidrBlock == newCidrBlock {
-		log.Printf("Rule %s already has the correct IP %s", ruleID, newIP)
+		log.Printf("Rule %s already has the correct IP %s, skipping update", targetRule.RuleID, newIP)
 		return targetRule, nil
 	}
+
+	log.Printf("IP mismatch detected: current=%s, target=%s, proceeding with update", targetRule.CidrBlock, newCidrBlock)
 
 	// 删除旧规则并创建新规则（Lighthouse不支持直接更新）
 	// 首先创建新规则

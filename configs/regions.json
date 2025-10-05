@@ -1,5 +1,5 @@
 {
-    "tencent": [
+    "TencentCloud": [
         {
             "Code": "ap-beijing",
             "Name": "北京",
@@ -86,7 +86,7 @@
             "Provider": "tencent"
         }
     ],
-    "aliyun": [
+    "Aliyun": [
         {
             "Code": "cn-qingdao",
             "Name": "华北1（青岛）",
@@ -233,7 +233,7 @@
             "Provider": "aliyun"
         }
     ],
-    "huawei": [
+    "HuaweiCloud": [
         {
             "Code": "ae-ad-1",
             "Name": "中东-阿布扎比-OP5",

@@ -7,12 +7,12 @@ import (
 	"FireFlow/internal/repository"
 	"FireFlow/internal/service"
 	"embed"
-	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -22,11 +22,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed web/templates/*
-var templateFS embed.FS
-
-//go:embed web/static
-var staticFS embed.FS
+//go:embed all:web
+var webFS embed.FS
 
 // 默认配置内容
 const defaultConfigContent = `
@@ -49,23 +46,6 @@ func createDefaultConfig(configPath string) error {
 	return os.WriteFile(configPath, []byte(defaultConfigContent), 0644)
 }
 
-// setupWebAssets 设置嵌入的模板和静态文件
-func setupWebAssets(r *gin.Engine) {
-	// 加载嵌入的模板
-	tmpl, err := template.ParseFS(templateFS, "web/templates/*")
-	if err != nil {
-		log.Fatalf("Failed to parse embedded templates: %v", err)
-	}
-	r.SetHTMLTemplate(tmpl)
-
-	// 设置嵌入的静态文件
-	staticSubFS, err := fs.Sub(staticFS, "web/static")
-	if err != nil {
-		log.Fatalf("Failed to create static sub filesystem: %v", err)
-	}
-	r.StaticFS("/static", http.FS(staticSubFS))
-}
-
 func main() {
 	// 加载 .env 文件（如果存在）
 	if err := godotenv.Load(); err != nil {
@@ -74,10 +54,19 @@ func main() {
 		log.Printf("Loaded environment variables from .env file")
 	}
 
+	// 从环境变量获取运行模式
+	appMode := os.Getenv("APP_MODE")
+	if appMode == "" {
+		appMode = "production" // 默认为生产模式
+	}
+
 	// 设置 Gin 模式
 	if os.Getenv("GIN_MODE") == "" {
-		// 如果没有设置环境变量，默认使用 release 模式
-		gin.SetMode(gin.ReleaseMode)
+		if appMode == "development" {
+			gin.SetMode(gin.DebugMode)
+		} else {
+			gin.SetMode(gin.ReleaseMode)
+		}
 	}
 
 	viper.SetConfigName("config")
@@ -114,13 +103,39 @@ func main() {
 		log.Fatalf("Failed to create database directory: %v", err)
 	}
 
-	// 使用纯 Go SQLite 驱动配置
+	// 使用纯 Go SQLite 驱动配置，添加防锁配置
+	dsn := dbPath + "?_timeout=30000&_journal_mode=WAL&_synchronous=NORMAL&_cache_size=1000&_foreign_keys=1&_busy_timeout=30000"
 	db, err := gorm.Open(sqlite.New(sqlite.Config{
 		DriverName: "sqlite",
-		DSN:        dbPath,
-	}), &gorm.Config{})
+		DSN:        dsn,
+	}), &gorm.Config{
+		// 添加数据库连接池配置
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	// 配置连接池
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("Failed to get underlying sql.DB: %v", err)
+	}
+
+	// 设置连接池参数以避免锁定
+	sqlDB.SetMaxOpenConns(1)    // SQLite 只支持单个写连接
+	sqlDB.SetMaxIdleConns(1)    // 保持一个空闲连接
+	sqlDB.SetConnMaxLifetime(0) // 连接不过期
+
+	// 执行WAL模式初始化
+	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		log.Printf("Warning: Failed to set WAL mode: %v", err)
+	}
+	if _, err := sqlDB.Exec("PRAGMA synchronous=NORMAL;"); err != nil {
+		log.Printf("Warning: Failed to set synchronous mode: %v", err)
+	}
+	if _, err := sqlDB.Exec("PRAGMA busy_timeout=30000;"); err != nil {
+		log.Printf("Warning: Failed to set busy timeout: %v", err)
 	}
 	// Auto-migrate the schema
 	if err := db.AutoMigrate(
@@ -146,22 +161,97 @@ func main() {
 	})
 	cronManager.Start() // 启动cron引擎
 
-	// 为所有启用的规则启动独立的定时任务
-	if err := firewallService.StartRuleUpdateJobs(cronManager); err != nil {
-		log.Printf("Failed to start rule update jobs: %v", err)
-	}
+	// 注释掉单规则定时任务，避免与全局任务冲突
+	// if err := firewallService.StartRuleUpdateJobs(cronManager); err != nil {
+	// 	log.Printf("Failed to start rule update jobs: %v", err)
+	// }
+
+	log.Printf("Global firewall update job started")
 
 	r := gin.Default()
 
-	// Setup web assets (templates and static files)
-	setupWebAssets(r)
+	// 根据运行模式配置CORS和前端路由
+	if appMode == "" {
+		appMode = viper.GetString("server.mode")
+		if appMode == "" {
+			appMode = "production"
+		}
+	}
 
-	// Base URL for the frontend
-	r.GET("/", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "index.html", gin.H{
-			"title": "动态防火墙规则管理",
+	log.Printf("Running in %s mode", appMode)
+
+	if appMode == "development" {
+		// 开发模式：添加CORS支持，允许前端跨域访问
+		r.Use(func(c *gin.Context) {
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With")
+
+			if c.Request.Method == "OPTIONS" {
+				c.AbortWithStatus(204)
+				return
+			}
+
+			c.Next()
 		})
-	})
+
+		log.Printf("Development mode: CORS enabled for frontend at %s", os.Getenv("FRONTEND_URL"))
+	} else {
+		// 生产模式：提供静态文件服务
+		frontend, err := fs.Sub(webFS, "web")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		static, err := fs.Sub(frontend, "static")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 处理静态文件
+		r.StaticFS("/static", http.FS(static))
+
+		// 处理根目录下的静态文件（如 vite.svg）
+		r.GET("/vite.svg", func(c *gin.Context) {
+			data, err := frontend.Open("vite.svg")
+			if err != nil {
+				c.Status(404)
+				return
+			}
+			defer data.Close()
+			c.DataFromReader(200, -1, "image/svg+xml", data, nil)
+		})
+
+		// 处理根路径
+		r.GET("/", func(c *gin.Context) {
+			data, err := frontend.Open("index.html")
+			if err != nil {
+				c.Status(404)
+				return
+			}
+			defer data.Close()
+			c.DataFromReader(200, -1, "text/html; charset=utf-8", data, nil)
+		})
+
+		// 对于所有其他路由，返回 index.html（SPA 路由支持）
+		r.NoRoute(func(c *gin.Context) {
+			// 只对非 API 路径和非静态文件路径返回 index.html
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/") &&
+				!strings.HasPrefix(c.Request.URL.Path, "/static/") {
+				data, err := frontend.Open("index.html")
+				if err != nil {
+					c.Status(404)
+					return
+				}
+				defer data.Close()
+				c.DataFromReader(200, -1, "text/html; charset=utf-8", data, nil)
+			} else {
+				c.Status(404)
+			}
+		})
+
+		log.Printf("Production mode: Serving embedded frontend files")
+	}
 
 	// Register API v1 routes
 	apiV1Group := r.Group("/api/v1")

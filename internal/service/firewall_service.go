@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/spf13/viper"
 )
@@ -18,6 +19,9 @@ type FirewallService struct {
 	tencentClient *cloud.TencentClient
 	aliyunClient  *cloud.AliyunClient
 	configService ConfigService
+	// 添加互斥锁防止并发更新
+	updateMutex sync.RWMutex
+	ruleLocks   map[uint]*sync.Mutex // 每个规则的独立锁
 }
 
 func NewFirewallService(repo repository.FirewallRepository, configService ConfigService) *FirewallService {
@@ -63,7 +67,29 @@ func NewFirewallService(repo repository.FirewallRepository, configService Config
 		tencentClient: tencentClient,
 		aliyunClient:  aliyunClient,
 		configService: configService,
+		ruleLocks:     make(map[uint]*sync.Mutex),
 	}
+}
+
+// getRuleLock 获取指定规则的锁（如果不存在则创建）
+func (s *FirewallService) getRuleLock(ruleID uint) *sync.Mutex {
+	s.updateMutex.RLock()
+	if lock, exists := s.ruleLocks[ruleID]; exists {
+		s.updateMutex.RUnlock()
+		return lock
+	}
+	s.updateMutex.RUnlock()
+
+	s.updateMutex.Lock()
+	defer s.updateMutex.Unlock()
+
+	// 双重检查
+	if lock, exists := s.ruleLocks[ruleID]; exists {
+		return lock
+	}
+
+	s.ruleLocks[ruleID] = &sync.Mutex{}
+	return s.ruleLocks[ruleID]
 }
 
 // UpdateAllRules is the main logic executed by the cron job.
@@ -85,51 +111,62 @@ func (s *FirewallService) UpdateAllRules() {
 		return
 	}
 
-	// 3. Iterate and update each rule (无论IP是否变化都要执行)
+	// 3. Iterate and update each rule (云服务提供商会检查IP是否一致，避免不必要的更新)
 	for _, rule := range rules {
-		// 只处理有备注的规则
-		if rule.Remark == "" {
-			log.Printf("Skipping rule %d: no remark provided", rule.ID)
-			continue
-		}
+		// 获取该规则的独立锁
+		ruleLock := s.getRuleLock(rule.ID)
+		ruleLock.Lock()
 
-		// 检查规则是否启用
-		if !rule.Enabled {
-			log.Printf("Skipping rule %d: rule is disabled", rule.ID)
-			continue
-		}
+		s.processRule(rule, currentIP)
 
-		// 检查对应的云服务配置是否启用
-		if err := s.checkCloudConfigEnabled(rule.Provider); err != nil {
-			log.Printf("Skipping rule %d: %v", rule.ID, err)
-			continue
-		}
-
-		log.Printf("Processing rule %d (%s) - Current IP: %s, Last IP: %s", rule.ID, rule.Remark, currentIP, rule.LastIP)
-
-		var updateErr error
-		switch rule.Provider {
-		case "TencentCloud":
-			// 使用getTencentClient方法获取客户端，而不是检查全局客户端
-			updateErr = s.updateTencentFirewallRule(&rule, currentIP)
-		case "Aliyun":
-			updateErr = s.updateAliyunFirewallRule(&rule, currentIP)
-		default:
-			updateErr = fmt.Errorf("unsupported provider: %s", rule.Provider)
-		}
-
-		if updateErr != nil {
-			log.Printf("Failed to update rule %d: %v", rule.ID, updateErr)
-		} else {
-			// 4. If update succeeds, save the new IP to the database
-			if err := s.repo.UpdateIP(rule.ID, currentIP); err != nil {
-				log.Printf("Failed to update IP in database for rule %d: %v", rule.ID, err)
-			} else {
-				log.Printf("Successfully updated rule %d to IP %s", rule.ID, currentIP)
-			}
-		}
+		ruleLock.Unlock()
 	}
 	log.Println("Firewall update job finished.")
+}
+
+// processRule 处理单个规则的更新逻辑
+func (s *FirewallService) processRule(rule model.FirewallRule, currentIP string) {
+	// 只处理有备注的规则
+	if rule.Remark == "" {
+		log.Printf("Skipping rule %d: no remark provided", rule.ID)
+		return
+	}
+
+	// 检查规则是否启用
+	if !rule.Enabled {
+		log.Printf("Skipping rule %d: rule is disabled", rule.ID)
+		return
+	}
+
+	// 检查对应的云服务配置是否启用
+	if err := s.checkCloudConfigEnabled(rule.Provider); err != nil {
+		log.Printf("Skipping rule %d: %v", rule.ID, err)
+		return
+	}
+
+	log.Printf("Processing rule %d (%s) - Current IP: %s, Last IP: %s", rule.ID, rule.Remark, currentIP, rule.LastIP)
+
+	var updateErr error
+	switch rule.Provider {
+	case "TencentCloud":
+		// 使用getTencentClient方法获取客户端，而不是检查全局客户端
+		updateErr = s.updateTencentFirewallRule(&rule, currentIP)
+	case "Aliyun":
+		updateErr = s.updateAliyunFirewallRule(&rule, currentIP)
+	default:
+		updateErr = fmt.Errorf("unsupported provider: %s", rule.Provider)
+	}
+
+	if updateErr != nil {
+		log.Printf("Failed to update rule %d: %v", rule.ID, updateErr)
+	} else {
+		// 4. If update succeeds, save the new IP to the database
+		if err := s.repo.UpdateIP(rule.ID, currentIP); err != nil {
+			log.Printf("Failed to update IP in database for rule %d: %v", rule.ID, err)
+		} else {
+			log.Printf("Successfully updated rule %d to IP %s", rule.ID, currentIP)
+		}
+	}
 }
 
 // checkCloudConfigEnabled 检查指定提供商的云服务配置是否启用
@@ -423,24 +460,24 @@ func (s *FirewallService) updateAliyunFirewallRule(rule *model.FirewallRule, new
 	if err != nil {
 		// 如果更新失败，可能是规则已被手动删除，尝试重新创建
 		errStr := err.Error()
-		if strings.Contains(errStr, "InvalidSecurityGroupRule.NotFound") || 
-		   strings.Contains(errStr, "rule does not exist") ||
-		   strings.Contains(errStr, "not found") {
+		if strings.Contains(errStr, "InvalidSecurityGroupRule.NotFound") ||
+			strings.Contains(errStr, "rule does not exist") ||
+			strings.Contains(errStr, "not found") {
 			log.Printf("Rule %s not found in cloud, attempting to recreate", rule.RuleID)
-			
+
 			// 尝试重新创建规则
 			result, createErr := client.CreateFirewallRule(rule.InstanceID, ruleSpec)
 			if createErr != nil {
 				return fmt.Errorf("failed to recreate Aliyun firewall rule after rule not found: %v", createErr)
 			}
-			
+
 			// 更新数据库中的规则ID
 			rule.RuleID = result.RuleID
 			if err := s.repo.Update(rule); err != nil {
 				log.Printf("Failed to update rule ID in database: %v", err)
 			}
-			
-			log.Printf("Successfully recreated Aliyun firewall rule %s for instance %s: %s", 
+
+			log.Printf("Successfully recreated Aliyun firewall rule %s for instance %s: %s",
 				rule.RuleID, rule.InstanceID, newIP)
 			return nil
 		}
@@ -587,6 +624,11 @@ func (s *FirewallService) GetAliyunInstanceInfo(instanceID string, cloudConfigID
 
 // UpdateSingleRule 更新单个规则的IP
 func (s *FirewallService) UpdateSingleRule(ruleID uint) error {
+	// 获取规则的独立锁
+	ruleLock := s.getRuleLock(ruleID)
+	ruleLock.Lock()
+	defer ruleLock.Unlock()
+
 	log.Printf("Starting update for rule %d...", ruleID)
 
 	// 获取规则信息
@@ -610,39 +652,10 @@ func (s *FirewallService) UpdateSingleRule(ruleID uint) error {
 
 	log.Printf("Current public IP for rule %d: %s", ruleID, currentIP)
 
-	// 检查IP是否改变
-	if rule.LastIP == currentIP {
-		log.Printf("IP not changed for rule %d (%s), updating timestamp only", ruleID, currentIP)
-		// 仍需要更新数据库以更新UpdatedAt时间
-		return s.repo.Update(rule)
-	}
+	// 使用共用的处理逻辑
+	s.processRule(*rule, currentIP)
 
-	log.Printf("IP changed for rule %d from %s to %s, updating...", ruleID, rule.LastIP, currentIP)
-
-	// 根据Provider更新防火墙规则
-	switch rule.Provider {
-	case "TencentCloud":
-		err = s.updateTencentFirewallRule(rule, currentIP)
-	case "Aliyun":
-		err = s.updateAliyunFirewallRule(rule, currentIP)
-	default:
-		err = fmt.Errorf("unsupported provider: %s", rule.Provider)
-	}
-
-	if err != nil {
-		log.Printf("Failed to update rule %d: %v", ruleID, err)
-		return err
-	}
-
-	// 更新数据库记录 - 更新IP并自动更新UpdatedAt时间
-	rule.LastIP = currentIP
-	err = s.repo.Update(rule)
-	if err != nil {
-		log.Printf("Failed to update database for rule %d: %v", ruleID, err)
-		return err
-	}
-
-	log.Printf("Successfully updated rule %d with new IP: %s", ruleID, currentIP)
+	log.Printf("Finished update for rule %d", ruleID)
 	return nil
 }
 

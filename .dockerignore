@@ -11,6 +11,12 @@ fireflow
 vendor/
 node_modules/
 
+# Ignore frontend files (will be downloaded in Dockerfile)
+frontend/
+cmd/server/web/
+*.zip
+*.tar.gz
+
 # Ignore editor and OS files
 *.log
 *.swp
@@ -32,7 +38,7 @@ docker-compose.yml
 .cnb.*
 
 # Ignore sqlite database files
-*.db
+*.db*
 
 test/
 data/

@@ -69,6 +69,23 @@ jobs:
       - name: Get dependencies
         run: go mod download
 
+      - name: Download latest frontend release
+        run: |
+          echo "🔍 Getting latest frontend release..."
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/lm379/fireflow-frontend/releases/latest | jq -r '.tag_name')
+          echo "📦 Latest release: $LATEST_RELEASE"
+          
+          echo "⬇️ Downloading frontend dist..."
+          curl -L -o dist.zip "https://github.com/lm379/fireflow-frontend/releases/download/$LATEST_RELEASE/dist.zip"
+          
+          echo "📂 Extracting to cmd/server/web..."
+          mkdir -p cmd/server/web
+          unzip -o dist.zip -d cmd/server/web
+          rm dist.zip
+          
+          echo "✅ Frontend files extracted:"
+          ls -la cmd/server/web/
+
       - name: Build binary
         env:
           CGO_ENABLED: 0

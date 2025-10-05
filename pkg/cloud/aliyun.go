@@ -194,8 +194,44 @@ func (ac *AliyunClient) DeleteFirewallRule(instanceID, ruleID string) error {
 }
 
 func (ac *AliyunClient) UpdateFirewallRule(instanceID, ruleID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error) {
-	// 阿里云安全组规则不支持直接更新，需要先删除再创建
-	err := ac.DeleteFirewallRule(instanceID, ruleID)
+	log.Printf("Updating Aliyun firewall rule for instance %s with new IP %s", instanceID, newIP)
+	log.Printf("Rule spec: Protocol=%s, Port=%s, Description=%s", ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
+
+	// 先查询现有规则，检查IP是否已经一致
+	existingRules, err := ac.ListFirewallRules(instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing rules: %v", err)
+	}
+
+	// 查找匹配的规则
+	var targetRule *FirewallRuleResult
+	for _, rule := range existingRules {
+		if rule.RuleID == ruleID {
+			targetRule = rule
+			log.Printf("Found target rule: RuleID=%s, CidrBlock=%s", rule.RuleID, rule.CidrBlock)
+			break
+		}
+	}
+
+	if targetRule == nil {
+		// 规则不存在，可能已被手动删除，直接创建新规则
+		log.Printf("Rule %s not found in cloud, creating new rule", ruleID)
+		newRule := *ruleSpec
+		newRule.CidrBlock = fmt.Sprintf("%s/32", newIP)
+		return ac.CreateFirewallRule(instanceID, &newRule)
+	}
+
+	// 检查IP是否已经一致
+	newCidrBlock := fmt.Sprintf("%s/32", newIP)
+	if targetRule.CidrBlock == newCidrBlock {
+		log.Printf("Rule %s already has the correct IP %s, skipping update", ruleID, newIP)
+		return targetRule, nil
+	}
+
+	log.Printf("IP mismatch detected: current=%s, target=%s, proceeding with update", targetRule.CidrBlock, newCidrBlock)
+
+	// 先删除再创建规则
+	err = ac.DeleteFirewallRule(instanceID, ruleID)
 	if err != nil {
 		// 即使删除失败，也记录日志并继续创建新规则
 		// 因为规则可能已经在云端被手动删除了
@@ -204,7 +240,7 @@ func (ac *AliyunClient) UpdateFirewallRule(instanceID, ruleID string, ruleSpec *
 
 	// 更新CIDR块为新IP
 	newRule := *ruleSpec
-	newRule.CidrBlock = fmt.Sprintf("%s/32", newIP)
+	newRule.CidrBlock = newCidrBlock
 
 	return ac.CreateFirewallRule(instanceID, &newRule)
 }
