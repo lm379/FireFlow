@@ -1,0 +1,408 @@
+{
+    "tencent": [
+        {
+            "Code": "ap-beijing",
+            "Name": "北京",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-shanghai",
+            "Name": "上海",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-guangzhou",
+            "Name": "广州",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-chengdu",
+            "Name": "成都",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-nanjing",
+            "Name": "南京",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-hongkong",
+            "Name": "中国香港",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-singapore",
+            "Name": "新加坡",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "na-siliconvalley",
+            "Name": "硅谷",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-tokyo",
+            "Name": "东京",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-seoul",
+            "Name": "首尔",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "eu-frankfurt",
+            "Name": "法兰克福",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-jakarta",
+            "Name": "雅加达",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "na-ashburn",
+            "Name": "弗吉尼亚",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-bangkok",
+            "Name": "曼谷",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "sa-saopaulo",
+            "Name": "圣保罗",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "ap-chongqing",
+            "Name": "重庆",
+            "Provider": "tencent"
+        },
+        {
+            "Code": "me-saudi-arabia",
+            "Name": "沙特阿拉伯",
+            "Provider": "tencent"
+        }
+    ],
+    "aliyun": [
+        {
+            "Code": "cn-qingdao",
+            "Name": "华北1（青岛）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-beijing",
+            "Name": "华北2（北京）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-zhangjiakou",
+            "Name": "华北3（张家口）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-huhehaote",
+            "Name": "华北5（呼和浩特）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-wulanchabu",
+            "Name": "华北6（乌兰察布）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-hangzhou",
+            "Name": "华东1（杭州）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-shanghai",
+            "Name": "华东2（上海）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-nanjing",
+            "Name": "华东5 （南京）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-fuzhou",
+            "Name": "华东6（福州）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-shenzhen",
+            "Name": "华南1（深圳）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-heyuan",
+            "Name": "华南2（河源）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-guangzhou",
+            "Name": "华南3（广州）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-wuhan-lr",
+            "Name": "华中1（武汉）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-chengdu",
+            "Name": "西南1（成都）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "cn-hongkong",
+            "Name": "中国香港",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "ap-southeast-1",
+            "Name": "新加坡",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "ap-southeast-3",
+            "Name": "马来西亚（吉隆坡）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "ap-southeast-5",
+            "Name": "印度尼西亚（雅加达）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "ap-southeast-6",
+            "Name": "菲律宾（马尼拉）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "ap-southeast-7",
+            "Name": "泰国（曼谷）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "ap-northeast-1",
+            "Name": "日本（东京）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "ap-northeast-2",
+            "Name": "韩国（首尔）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "us-west-1",
+            "Name": "美国（硅谷）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "us-east-1",
+            "Name": "美国（弗吉尼亚）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "eu-central-1",
+            "Name": "德国（法兰克福）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "eu-west-1",
+            "Name": "英国（伦敦）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "me-east-1",
+            "Name": "阿联酋（迪拜）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "me-central-1",
+            "Name": "沙特（利雅得）",
+            "Provider": "aliyun"
+        },
+        {
+            "Code": "na-south-1",
+            "Name": "墨西哥",
+            "Provider": "aliyun"
+        }
+    ],
+    "huawei": [
+        {
+            "Code": "ae-ad-1",
+            "Name": "中东-阿布扎比-OP5",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "af-north-1",
+            "Name": "非洲-开罗",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "af-south-1",
+            "Name": "非洲-约翰内斯堡",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "ap-southeast-1",
+            "Name": "中国-香港",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "ap-southeast-2",
+            "Name": "亚太-曼谷",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "ap-southeast-3",
+            "Name": "亚太-新加坡",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "ap-southeast-4",
+            "Name": "亚太-雅加达",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "ap-southeast-5",
+            "Name": "亚太-马尼拉",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-east-2",
+            "Name": "华东-上海二",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-east-3",
+            "Name": "华东-上海一",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-east-4",
+            "Name": "华东二",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-east-5",
+            "Name": "华东-青岛",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-north-1",
+            "Name": "华北-北京一",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-north-11",
+            "Name": "华北-乌兰察布-汽车一",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-north-12",
+            "Name": "华北三",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-north-2",
+            "Name": "华北-北京二",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-north-4",
+            "Name": "华北-北京四",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-north-9",
+            "Name": "华北-乌兰察布一",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-south-1",
+            "Name": "华南-广州",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-south-2",
+            "Name": "华南-深圳",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-south-4",
+            "Name": "华南-广州-友好用户环境",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-southwest-2",
+            "Name": "西南-贵阳一",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "cn-southwest-3",
+            "Name": "西南-贵阳-汽车二",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "eu-west-0",
+            "Name": "欧洲-巴黎",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "eu-west-101",
+            "Name": "欧洲-都柏林",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "la-north-2",
+            "Name": "拉美-墨西哥城二",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "la-south-2",
+            "Name": "拉美-圣地亚哥",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "me-east-1",
+            "Name": "中东-利雅得",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "my-kualalumpur-1",
+            "Name": "亚太-吉隆坡-OP6",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "na-mexico-1",
+            "Name": "拉美-墨西哥城一",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "ru-moscow-1",
+            "Name": "俄罗斯-莫斯科-OP4",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "ru-northwest-2",
+            "Name": "俄罗斯-莫斯科二",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "sa-brazil-1",
+            "Name": "拉美-圣保罗一",
+            "Provider": "huawei"
+        },
+        {
+            "Code": "tr-west-1",
+            "Name": "土耳其-伊斯坦布尔",
+            "Provider": "huawei"
+        }
+    ]
+}

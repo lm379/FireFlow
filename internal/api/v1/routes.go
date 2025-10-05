@@ -15,6 +15,7 @@ func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallSe
 	configHandler := NewConfigHandler(configService, cronManager)
 	configHandler.SetFirewallService(firewallService) // 设置防火墙服务
 	cloudConfigHandler := NewCloudConfigHandler(configService)
+	regionHandler := NewRegionHandler() // 创建地域处理器
 
 	// 防火墙规则路由
 	ruleRoutes := router.Group("/rules")
@@ -57,4 +58,15 @@ func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallSe
 	// IP同步路由
 	router.POST("/sync-ip/", configHandler.SyncIPNow)
 	router.GET("/current-ip/", configHandler.GetCurrentIP)
+
+	// 地域相关路由
+	regionRoutes := router.Group("/regions")
+	{
+		regionRoutes.GET("", regionHandler.GetRegions)        // 获取地域列表
+		regionRoutes.GET("/search", regionHandler.SearchRegions) // 搜索地域
+		regionRoutes.GET("/detail", regionHandler.GetRegionByCode) // 获取地域详情
+	}
+	
+	// 云厂商路由
+	router.GET("/providers", regionHandler.GetProviders) // 获取云厂商列表
 }

@@ -112,15 +112,17 @@
                                 <label for="cloud-provider">云服务商</label>
                                 <select id="cloud-provider" required>
                                     <option value="">请选择云服务商</option>
-                                    <option value="TencentCloud">腾讯云</option>
-                                    <option value="Aliyun">阿里云</option>
-                                    <option value="AWS">亚马逊云</option>
-                                    <option value="HuaweiCloud">华为云</option>
+                                    <!-- 云服务商选项将通过API动态加载 -->
                                 </select>
                             </div>
                             <div class="form-group">
                                 <label for="cloud-region">区域</label>
-                                <input type="text" id="cloud-region" placeholder="例如：ap-beijing" required>
+                                <div class="region-input-container">
+                                    <input type="text" id="cloud-region" placeholder="请先选择云服务商..." required disabled>
+                                    <div class="region-dropdown" id="region-dropdown" style="display: none;">
+                                        <!-- 地域选项将通过API动态加载 -->
+                                    </div>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label for="instance-id">实例ID/安全组ID</label>

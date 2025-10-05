@@ -1,18 +1,31 @@
 // 全局变量
 let currentEditId = null;
 let currentEditType = null;
+let currentProviders = []; // 存储从API获取的云服务商列表
+let regionSearchTimeout = null; // 地域搜索防抖计时器
 
-// 云服务商中文映射
-const providerNames = {
-    'TencentCloud': '腾讯云',
-    'Aliyun': '阿里云',
-    'AWS': '亚马逊云（暂未支持）',
-    'HuaweiCloud': '华为云（暂未支持）',
+// 云服务商中文映射（从API获取数据后动态更新）
+let providerNames = {
+    'aliyun': '阿里云',
+    'tencent': '腾讯云', 
+    'huawei': '华为云'
+};
+
+// 云服务商代码映射
+const providerCodeMap = {
+    'aliyun': 'Aliyun',
+    'tencent': 'TencentCloud',
+    'huawei': 'HuaweiCloud'
 };
 
 // 获取云服务商中文名称
 function getProviderDisplayName(provider) {
     return providerNames[provider] || provider;
+}
+
+// 获取云服务商代码（用于API调用）
+function getProviderCode(provider) {
+    return providerCodeMap[provider] || provider;
 }
 
 // 标签页切换
@@ -51,6 +64,7 @@ function switchTab(tabName, targetElement = null) {
             fetchRules();
             break;
         case 'cloud-config':
+            loadProviders(); // 加载云服务商列表
             fetchCloudConfigs();
             break;
         case 'system':
@@ -501,6 +515,143 @@ function cancelEditRule() {
 
 // ============= 云服务配置管理 =============
 
+// 加载云服务商列表
+async function loadProviders() {
+    try {
+        const response = await apiRequest('/api/v1/providers');
+        const select = document.getElementById('cloud-provider');
+        
+        if (response.code === 200) {
+            currentProviders = response.data;
+            
+            // 清空现有选项
+            select.innerHTML = '<option value="">请选择云服务商</option>';
+            
+            // 添加云服务商选项
+            response.data.forEach(provider => {
+                const option = document.createElement('option');
+                option.value = getProviderCode(provider);
+                option.textContent = getProviderDisplayName(provider);
+                option.dataset.providerKey = provider; // 存储原始provider key用于API调用
+                select.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('加载云服务商列表失败:', error);
+        showMessage('加载云服务商列表失败', 'error');
+    }
+}
+
+// 加载地域列表
+async function loadRegions(provider) {
+    const regionInput = document.getElementById('cloud-region');
+    const dropdown = document.getElementById('region-dropdown');
+    
+    if (!provider) {
+        regionInput.placeholder = '请先选择云服务商...';
+        regionInput.disabled = true;
+        dropdown.style.display = 'none';
+        return;
+    }
+
+    try {
+        regionInput.placeholder = '正在加载地域列表...';
+        dropdown.innerHTML = '<div class="region-dropdown-loading">正在加载...</div>';
+        dropdown.style.display = 'block';
+
+        const response = await apiRequest(`/api/v1/regions?provider=${provider}&limit=100`);
+        
+        if (response.code === 200) {
+            regionInput.placeholder = '请选择地域或输入搜索...';
+            regionInput.disabled = false;
+            
+            showRegionDropdown(response.data);
+        } else {
+            throw new Error(response.message || '加载地域失败');
+        }
+    } catch (error) {
+        console.error('加载地域列表失败:', error);
+        regionInput.placeholder = '加载地域失败';
+        dropdown.innerHTML = '<div class="region-dropdown-empty">加载地域失败</div>';
+    }
+}
+
+// 显示地域下拉列表
+function showRegionDropdown(regions) {
+    const dropdown = document.getElementById('region-dropdown');
+    
+    if (!regions || regions.length === 0) {
+        dropdown.innerHTML = '<div class="region-dropdown-empty">没有找到地域数据</div>';
+        dropdown.style.display = 'block';
+        return;
+    }
+
+    dropdown.innerHTML = '';
+    regions.forEach(region => {
+        const item = document.createElement('div');
+        item.className = 'region-dropdown-item';
+        item.innerHTML = `
+            <span class="region-code">${region.code}</span>
+            <span class="region-name">${region.name}</span>
+        `;
+        item.addEventListener('click', () => selectRegion(region));
+        dropdown.appendChild(item);
+    });
+    
+    dropdown.style.display = 'block';
+}
+
+// 选择地域
+function selectRegion(region) {
+    const regionInput = document.getElementById('cloud-region');
+    const dropdown = document.getElementById('region-dropdown');
+    
+    regionInput.value = region.code;
+    dropdown.style.display = 'none';
+}
+
+// 搜索地域
+async function searchRegions(provider, keyword) {
+    const dropdown = document.getElementById('region-dropdown');
+    
+    if (!provider) {
+        dropdown.style.display = 'none';
+        return;
+    }
+
+    if (!keyword || keyword.trim() === '') {
+        // 如果没有关键词，显示所有地域
+        loadRegions(provider);
+        return;
+    }
+
+    try {
+        dropdown.innerHTML = '<div class="region-dropdown-loading">搜索中...</div>';
+        dropdown.style.display = 'block';
+
+        const response = await apiRequest(`/api/v1/regions/search?provider=${provider}&keyword=${encodeURIComponent(keyword.trim())}&limit=20`);
+        
+        if (response.code === 200) {
+            if (response.data.length === 0) {
+                dropdown.innerHTML = '<div class="region-dropdown-empty">未找到匹配的地域</div>';
+            } else {
+                // 转换搜索结果为RegionOption格式
+                const regionOptions = response.data.map(region => ({
+                    code: region.code,
+                    name: region.name,
+                    label: `${region.name} (${region.code})`
+                }));
+                showRegionDropdown(regionOptions);
+            }
+        } else {
+            throw new Error(response.message || '搜索失败');
+        }
+    } catch (error) {
+        console.error('搜索地域失败:', error);
+        dropdown.innerHTML = '<div class="region-dropdown-empty">搜索失败</div>';
+    }
+}
+
 async function fetchCloudConfigs() {
     try {
         const configs = await apiRequest('/api/v1/cloud-configs/');
@@ -696,6 +847,9 @@ async function editCloudConfig(id) {
             return;
         }
 
+        // 确保云服务商列表已加载
+        await loadProviders();
+
         // 填充云服务配置表单
         document.getElementById('cloud-provider').value = config.provider || '';
         document.getElementById('cloud-region').value = config.region || '';
@@ -705,6 +859,13 @@ async function editCloudConfig(id) {
         document.getElementById('cloud-description').value = config.description || '';
         document.getElementById('is-default').value = config.is_default ? 'true' : 'false';
         document.getElementById('cloud-enabled').value = config.is_enabled ? 'true' : 'false';
+
+        // 设置provider后，找到对应的providerKey并加载地域
+        const providerSelect = document.getElementById('cloud-provider');
+        const selectedOption = providerSelect.options[providerSelect.selectedIndex];
+        if (selectedOption && selectedOption.dataset.providerKey) {
+            loadRegions(selectedOption.dataset.providerKey);
+        }
 
         // 切换到云服务配置标签
         switchTab('cloud-config');
@@ -914,6 +1075,65 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('addCloudConfigForm').addEventListener('submit', addCloudConfig);
     document.getElementById('systemConfigForm').addEventListener('submit', saveSystemConfig);
 
+    // 云服务商选择变化时加载地域列表
+    document.getElementById('cloud-provider').addEventListener('change', function () {
+        const selectedOption = this.options[this.selectedIndex];
+        const providerKey = selectedOption.dataset.providerKey;
+        
+        if (providerKey) {
+            loadRegions(providerKey);
+        } else {
+            // 清空地域输入框
+            const regionInput = document.getElementById('cloud-region');
+            const dropdown = document.getElementById('region-dropdown');
+            regionInput.value = '';
+            regionInput.placeholder = '请先选择云服务商...';
+            regionInput.disabled = true;
+            dropdown.style.display = 'none';
+        }
+    });
+
+    // 地域输入框事件
+    const regionInput = document.getElementById('cloud-region');
+    const dropdown = document.getElementById('region-dropdown');
+
+    // 地域输入框获得焦点时显示下拉列表
+    regionInput.addEventListener('focus', function () {
+        const providerSelect = document.getElementById('cloud-provider');
+        const selectedOption = providerSelect.options[providerSelect.selectedIndex];
+        const providerKey = selectedOption.dataset.providerKey;
+        
+        if (providerKey) {
+            if (this.value.trim() === '') {
+                loadRegions(providerKey);
+            } else {
+                searchRegions(providerKey, this.value.trim());
+            }
+        }
+    });
+
+    // 地域输入框输入时进行搜索
+    regionInput.addEventListener('input', function () {
+        const providerSelect = document.getElementById('cloud-provider');
+        const selectedOption = providerSelect.options[providerSelect.selectedIndex];
+        const providerKey = selectedOption.dataset.providerKey;
+        
+        // 防抖处理
+        clearTimeout(regionSearchTimeout);
+        regionSearchTimeout = setTimeout(() => {
+            if (providerKey) {
+                searchRegions(providerKey, this.value.trim());
+            }
+        }, 300);
+    });
+
+    // 点击其他地方隐藏地域下拉列表
+    document.addEventListener('click', function (event) {
+        if (!event.target.closest('.region-input-container')) {
+            dropdown.style.display = 'none';
+        }
+    });
+
     // 协议选择变化时的处理逻辑
     document.getElementById('protocol').addEventListener('change', function () {
         const protocolSelect = this;
@@ -962,6 +1182,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // 初始加载防火墙规则和系统配置
     loadSystemConfig();
     fetchRules();
+    loadProviders(); // 初始加载云服务商列表
 });
 
 // 计算下次更新时间
