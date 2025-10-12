@@ -7,11 +7,11 @@ require (
 	github.com/alibabacloud-go/ecs-20140526/v7 v7.2.1
 	github.com/alibabacloud-go/tea v1.3.12
 	github.com/gin-gonic/gin v1.11.0
+	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.171
 	github.com/joho/godotenv v1.5.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.21.0
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.1.32
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.1.31
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lighthouse v1.1.32
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.0
@@ -63,6 +63,7 @@ require (
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
+	go.mongodb.org/mongo-driver v1.17.4 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/arch v0.21.0 // indirect

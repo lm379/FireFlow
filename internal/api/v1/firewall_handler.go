@@ -85,9 +85,13 @@ func (h *FirewallHandler) CreateRule(c *gin.Context) {
 			return
 		}
 
-		// 自动填充Provider和InstanceID
+		// 自动填充Provider、InstanceID和ProjectID
 		rule.Provider = cloudConfig.Provider
 		rule.InstanceID = cloudConfig.InstanceId
+		// 如果云配置有ProjectID，自动填充到规则中
+		if cloudConfig.ProjectID != "" {
+			rule.ProjectID = cloudConfig.ProjectID
+		}
 	}
 
 	// 设置协议默认值
@@ -103,14 +107,6 @@ func (h *FirewallHandler) CreateRule(c *gin.Context) {
 	if err := h.service.CreateRule(&rule); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// 如果规则启用且有CronManager，启动定时任务
-	if rule.Enabled && h.cronManager != nil {
-		if err := h.service.StartSingleRuleUpdateJob(rule.ID, h.cronManager); err != nil {
-			// 定时任务启动失败不应影响规则创建，只记录错误
-			fmt.Printf("Failed to start update job for rule %d: %v", rule.ID, err)
-		}
 	}
 
 	c.JSON(http.StatusCreated, rule)
@@ -135,11 +131,6 @@ func (h *FirewallHandler) DeleteRule(c *gin.Context) {
 	}
 
 	ruleID := uint(id)
-
-	// 先停止定时任务
-	if h.cronManager != nil {
-		h.service.StopSingleRuleUpdateJob(ruleID, h.cronManager)
-	}
 
 	if err := h.service.DeleteRule(ruleID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -166,13 +157,6 @@ func (h *FirewallHandler) UpdateRule(c *gin.Context) {
 	ruleID := uint(id)
 	rule.ID = ruleID
 
-	// 获取原始规则状态
-	oldRule, err := h.service.GetRuleByID(ruleID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
-		return
-	}
-
 	// 当协议为ICMP或ALL时，强制端口为ALL
 	if rule.Protocol == "ICMP" || rule.Protocol == "ALL" {
 		rule.Port = "ALL"
@@ -181,20 +165,6 @@ func (h *FirewallHandler) UpdateRule(c *gin.Context) {
 	if err := h.service.UpdateRule(&rule); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// 管理定时任务
-	if h.cronManager != nil {
-		if oldRule.Enabled && !rule.Enabled {
-			// 规则被禁用，停止定时任务
-			h.service.StopSingleRuleUpdateJob(ruleID, h.cronManager)
-		} else if !oldRule.Enabled && rule.Enabled {
-			// 规则被启用，启动定时任务
-			if err := h.service.StartSingleRuleUpdateJob(ruleID, h.cronManager); err != nil {
-				fmt.Printf("Failed to start update job for rule %d: %v", ruleID, err)
-			}
-		}
-		// 如果规则保持启用状态，任务会继续运行（不需要重启）
 	}
 
 	c.JSON(http.StatusOK, rule)
@@ -209,11 +179,13 @@ func (h *FirewallHandler) ExecuteRule(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.ExecuteRule(uint(id)); err != nil {
+	result, err := h.service.ExecuteRule(uint(id))
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Rule executed successfully"})
+
+	c.JSON(http.StatusOK, result)
 }
 
 // SyncRules handles POST /api/v1/rules/sync

@@ -121,9 +121,7 @@ func (h *CloudConfigHandler) TestCloudConfig(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":         result.Success,
-		"message":         result.Message,
-		"instance_ip":     result.InstanceIP,
-		"instance_exists": result.InstanceExists,
+		"success": result.Success,
+		"message": result.Message,
 	})
 }

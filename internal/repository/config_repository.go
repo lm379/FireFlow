@@ -120,7 +120,7 @@ func (r *configRepository) UpdateCloudProviderConfig(config *model.CloudProvider
 	}
 	// 使用Select方法明确指定要更新的字段，确保布尔字段也能正确更新
 	return r.db.Model(&model.CloudProviderConfig{}).Where("id = ?", config.ID).
-		Select("provider", "secret_id", "secret_key", "region", "instance_id", "extra", "is_default", "is_enabled", "description", "updated_at").
+		Select("provider", "secret_id", "secret_key", "region", "instance_id", "project_id", "extra", "is_default", "is_enabled", "description", "updated_at").
 		Updates(config).Error
 }
 

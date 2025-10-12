@@ -15,6 +15,7 @@ type FirewallRepository interface {
 	Create(rule *model.FirewallRule) error
 	Update(rule *model.FirewallRule) error
 	UpdateIP(id uint, ip string) error
+	GetOldestUpdatedTime() (*time.Time, error)
 	Delete(id uint) error
 }
 
@@ -87,6 +88,23 @@ func (r *firewallRepo) UpdateIP(id uint, ip string) error {
 	return r.retryOnBusy(func() error {
 		return r.db.Model(&model.FirewallRule{}).Where("id = ?", id).Update("last_ip", ip).Error
 	}, 3)
+}
+
+func (r *firewallRepo) GetOldestUpdatedTime() (*time.Time, error) {
+	var rule model.FirewallRule
+	err := r.db.Where("enabled = ?", true).
+		Order("updated_at ASC").
+		Select("updated_at").
+		First(&rule).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil // 没有找到记录，返回nil
+		}
+		return nil, err
+	}
+
+	return &rule.UpdatedAt, nil
 }
 
 func (r *firewallRepo) Delete(id uint) error {

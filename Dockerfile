@@ -29,7 +29,8 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 FROM alpine:latest
 
 RUN apk add --no-cache ca-certificates tzdata && \
-    mkdir -p /app/configs
+    mkdir -p /app/configs && \
+    mkdir -p /app/configs/logs
 
 WORKDIR /app
 

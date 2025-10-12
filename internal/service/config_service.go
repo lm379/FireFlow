@@ -159,6 +159,8 @@ func (s *configService) TestCloudConfig(id uint) (*CloudTestResult, error) {
 		return s.testTencentInstance(&config)
 	case "Aliyun":
 		return s.testAliyunInstance(&config)
+	case "HuaweiCloud":
+		return s.testHuaweiInstance(&config)
 	default:
 		return &CloudTestResult{
 			Success: false,
@@ -207,10 +209,8 @@ func (s *configService) testTencentInstance(config *model.CloudProviderConfig) (
 	// 成功获取实例信息
 	message := fmt.Sprintf("实例检查成功，实例名称: %s，状态: %s", instanceInfo.InstanceName, instanceInfo.Status)
 	return &CloudTestResult{
-		Success:        true,
-		Message:        message,
-		InstanceExists: true,
-		InstanceIP:     instanceInfo.PublicIP,
+		Success: true,
+		Message: message,
 	}, nil
 }
 
@@ -252,10 +252,64 @@ func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*
 
 	message := fmt.Sprintf("安全组验证成功，名称: %s，描述: %s，规则数量: %d", sgInfo.Name, sgInfo.Description, sgInfo.RulesCount)
 	return &CloudTestResult{
-		Success:        true,
-		Message:        message,
-		InstanceExists: true,
-		InstanceIP:     "", // 安全组没有IP地址
+		Success: true,
+		Message: message,
+	}, nil
+}
+
+func (s *configService) testHuaweiInstance(config *model.CloudProviderConfig) (*CloudTestResult, error) {
+	// 华为云必须配置ProjectID
+	if config.ProjectID == "" {
+		return &CloudTestResult{
+			Success: false,
+			Message: "华为云配置错误：ProjectID 为空，请配置项目ID",
+		}, nil
+	}
+
+	// 构造华为云配置
+	huaweiConfig := &cloud.HuaweiConfig{
+		AK:              config.SecretId,
+		SK:              config.SecretKey,
+		Region:          config.Region,
+		ProjectID:       config.ProjectID,
+		SecurityGroupID: config.InstanceId, // 华为云存储的是安全组ID
+	}
+
+	// 创建华为云客户端
+	client, err := cloud.NewHuaweiClient(huaweiConfig)
+	if err != nil {
+		return &CloudTestResult{
+			Success: false,
+			Message: fmt.Sprintf("创建华为云客户端失败: %v", err),
+		}, err
+	}
+
+	// 如果没有配置安全组ID，只测试凭证
+	if config.InstanceId == "" {
+		return &CloudTestResult{
+			Success:        true,
+			Message:        fmt.Sprintf("华为云凭证验证成功，项目ID: %s，但未配置安全组ID", config.ProjectID),
+			InstanceExists: false,
+		}, nil
+	}
+
+	// 通过获取防火墙规则列表来验证安全组是否存在
+	rules, err := client.ListFirewallRules(config.InstanceId)
+	if err != nil {
+		return &CloudTestResult{
+			Success:        false,
+			Message:        fmt.Sprintf("安全组验证失败: %v", err),
+			InstanceExists: false,
+		}, err
+	}
+
+	// 构造成功消息，包含ProjectID信息
+	message := fmt.Sprintf("华为云安全组验证成功，安全组ID: %s，当前规则数量: %d，项目ID: %s",
+		config.InstanceId, len(rules), config.ProjectID)
+
+	return &CloudTestResult{
+		Success: true,
+		Message: message,
 	}, nil
 }
 
@@ -294,7 +348,7 @@ func (s *configService) MigrateCloudConfigFromYAML(yamlConfig map[string]interfa
 			SecretKey: secretKey,
 			Region:    region,
 			Extra:     string(otherConfigJSON),
-			IsDefault: provider == "tencent", // 假设腾讯云为默认
+			IsDefault: provider == "TencentCloud", // 假设腾讯云为默认
 			IsEnabled: true,
 		}
 
@@ -314,13 +368,4 @@ func getStringFromMap(m map[string]interface{}, key string) string {
 		}
 	}
 	return ""
-}
-
-func getBoolFromMap(m map[string]interface{}, key string) bool {
-	if val, ok := m[key]; ok {
-		if b, ok := val.(bool); ok {
-			return b
-		}
-	}
-	return false
 }

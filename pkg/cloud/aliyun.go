@@ -34,8 +34,7 @@ func NewAliyunClient(config AliyunConfig) (*AliyunClient, error) {
 		config.RegionID = "cn-hangzhou" // 默认杭州区域
 	}
 
-	log.Printf("Initializing Aliyun ECS client with AccessKeyID: %s, Region: %s",
-		maskAliyunSecretId(config.AccessKeyID), config.RegionID)
+	// log.Printf("Initializing Aliyun ECS client with AccessKeyID: %s, Region: %s", maskAliyunSecretId(config.AccessKeyID), config.RegionID)
 
 	// 创建客户端配置
 	clientConfig := &openapi.Config{
@@ -63,12 +62,12 @@ func (ac *AliyunClient) GetConfig() AliyunConfig {
 }
 
 // maskAliyunSecretId 隐藏密钥ID的敏感部分
-func maskAliyunSecretId(secretId string) string {
-	if len(secretId) <= 8 {
-		return "****"
-	}
-	return secretId[:4] + "****" + secretId[len(secretId)-4:]
-}
+// func maskAliyunSecretId(secretId string) string {
+// 	if len(secretId) <= 8 {
+// 		return "****"
+// 	}
+// 	return secretId[:4] + "****" + secretId[len(secretId)-4:]
+// }
 
 // 实现 CloudProvider 接口
 func (ac *AliyunClient) GetInstance(instanceID string) (*InstanceInfo, error) {
@@ -145,7 +144,6 @@ func (ac *AliyunClient) createSingleRule(instanceID, securityGroupId string, rul
 
 	// 返回创建的规则信息
 	return &FirewallRuleResult{
-		RuleID:      fmt.Sprintf("%s|%s|%s|%s", securityGroupId, rule.Protocol, portRange, rule.CidrBlock),
 		Port:        rule.Port,
 		Protocol:    rule.Protocol,
 		CidrBlock:   rule.CidrBlock,
@@ -156,48 +154,16 @@ func (ac *AliyunClient) createSingleRule(instanceID, securityGroupId string, rul
 	}, nil
 }
 
+// Deprecated: Use DeleteFirewallRuleBySpec instead
 func (ac *AliyunClient) DeleteFirewallRule(instanceID, ruleID string) error {
-	// 解析规则ID获取安全组和规则信息
-	parts := strings.Split(ruleID, "|")
-	if len(parts) != 4 {
-		return fmt.Errorf("invalid rule ID format, expected format: securityGroupId|protocol|portRange|cidrBlock, got: %s", ruleID)
-	}
-
-	securityGroupId := parts[0]
-	protocol := parts[1]
-	portRange := parts[2]
-	cidrBlock := parts[3]
-
-	request := &ecs20140526.RevokeSecurityGroupRequest{
-		RegionId:        tea.String(ac.config.RegionID),
-		SecurityGroupId: tea.String(securityGroupId),
-		IpProtocol:      tea.String(strings.ToLower(protocol)),
-		PortRange:       tea.String(portRange),
-		SourceCidrIp:    tea.String(cidrBlock),
-	}
-
-	_, err := ac.EcsClient.RevokeSecurityGroup(request)
-	if err != nil {
-		// 检查是否是规则不存在的错误
-		errStr := err.Error()
-		if strings.Contains(errStr, "InvalidSecurityGroupRule.NotFound") ||
-			strings.Contains(errStr, "The specified security group rule does not exist") ||
-			strings.Contains(errStr, "rule does not exist") {
-			// 规则已经不存在，认为删除成功
-			log.Printf("Security group rule already deleted: %s", ruleID)
-			return nil
-		}
-		return fmt.Errorf("failed to delete firewall rule: %v", err)
-	}
-
-	return nil
+	return fmt.Errorf("DeleteFirewallRule is deprecated, please use DeleteFirewallRuleBySpec instead")
 }
 
-func (ac *AliyunClient) UpdateFirewallRule(instanceID, ruleID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error) {
-	log.Printf("Updating Aliyun firewall rule for instance %s with new IP %s", instanceID, newIP)
-	log.Printf("Rule spec: Protocol=%s, Port=%s, Description=%s", ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
+func (ac *AliyunClient) UpdateFirewallRule(instanceID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error) {
+	// log.Printf("Updating Aliyun firewall rule for instance %s with new IP %s", instanceID, newIP)
+	// log.Printf("Rule spec: Protocol=%s, Port=%s, Description=%s", ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
 
-	// 先查询现有规则，检查IP是否已经一致
+	// 先查询现有规则，通过描述匹配规则
 	existingRules, err := ac.ListFirewallRules(instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list existing rules: %v", err)
@@ -206,16 +172,18 @@ func (ac *AliyunClient) UpdateFirewallRule(instanceID, ruleID string, ruleSpec *
 	// 查找匹配的规则
 	var targetRule *FirewallRuleResult
 	for _, rule := range existingRules {
-		if rule.RuleID == ruleID {
+		if rule.Description == ruleSpec.Description &&
+			rule.Protocol == ruleSpec.Protocol &&
+			rule.Port == ruleSpec.Port {
 			targetRule = rule
-			log.Printf("Found target rule: RuleID=%s, CidrBlock=%s", rule.RuleID, rule.CidrBlock)
+			log.Printf("Found target rule: Description=%s, CidrBlock=%s", rule.Description, rule.CidrBlock)
 			break
 		}
 	}
 
 	if targetRule == nil {
 		// 规则不存在，可能已被手动删除，直接创建新规则
-		log.Printf("Rule %s not found in cloud, creating new rule", ruleID)
+		log.Printf("Rule with description '%s' not found in cloud, creating new rule", ruleSpec.Description)
 		newRule := *ruleSpec
 		newRule.CidrBlock = fmt.Sprintf("%s/32", newIP)
 		return ac.CreateFirewallRule(instanceID, &newRule)
@@ -224,18 +192,17 @@ func (ac *AliyunClient) UpdateFirewallRule(instanceID, ruleID string, ruleSpec *
 	// 检查IP是否已经一致
 	newCidrBlock := fmt.Sprintf("%s/32", newIP)
 	if targetRule.CidrBlock == newCidrBlock {
-		log.Printf("Rule %s already has the correct IP %s, skipping update", ruleID, newIP)
+		log.Printf("Rule with description '%s' already has the correct IP %s, skipping update", ruleSpec.Description, newIP)
 		return targetRule, nil
 	}
 
-	log.Printf("IP mismatch detected: current=%s, target=%s, proceeding with update", targetRule.CidrBlock, newCidrBlock)
+	// log.Printf("IP mismatch detected: current=%s, target=%s, proceeding with update", targetRule.CidrBlock, newCidrBlock)
 
-	// 先删除再创建规则
-	err = ac.DeleteFirewallRule(instanceID, ruleID)
+	// 先删除现有规则
+	err = ac.DeleteFirewallRuleBySpec(instanceID, targetRule)
 	if err != nil {
 		// 即使删除失败，也记录日志并继续创建新规则
-		// 因为规则可能已经在云端被手动删除了
-		log.Printf("Warning: failed to delete old rule %s: %v", ruleID, err)
+		log.Printf("Warning: failed to delete old rule with description '%s': %v", ruleSpec.Description, err)
 	}
 
 	// 更新CIDR块为新IP
@@ -243,6 +210,45 @@ func (ac *AliyunClient) UpdateFirewallRule(instanceID, ruleID string, ruleSpec *
 	newRule.CidrBlock = newCidrBlock
 
 	return ac.CreateFirewallRule(instanceID, &newRule)
+}
+
+// 通过规则规格删除防火墙规则
+func (ac *AliyunClient) DeleteFirewallRuleBySpec(instanceID string, rule *FirewallRuleResult) error {
+	// 获取实例的安全组
+	securityGroupId, err := ac.getInstanceSecurityGroup(instanceID)
+	if err != nil {
+		return err
+	}
+
+	// 解析端口范围
+	portRange, err := ac.parsePortRange(rule.Port, rule.Protocol)
+	if err != nil {
+		return fmt.Errorf("invalid port range: %v", err)
+	}
+
+	request := &ecs20140526.RevokeSecurityGroupRequest{
+		RegionId:        tea.String(ac.config.RegionID),
+		SecurityGroupId: tea.String(securityGroupId),
+		IpProtocol:      tea.String(strings.ToLower(rule.Protocol)),
+		PortRange:       tea.String(portRange),
+		SourceCidrIp:    tea.String(rule.CidrBlock),
+	}
+
+	_, err = ac.EcsClient.RevokeSecurityGroup(request)
+	if err != nil {
+		// 检查是否是规则不存在的错误
+		errStr := err.Error()
+		if strings.Contains(errStr, "InvalidSecurityGroupRule.NotFound") ||
+			strings.Contains(errStr, "The specified security group rule does not exist") ||
+			strings.Contains(errStr, "rule does not exist") {
+			// 规则已经不存在，认为删除成功
+			// log.Printf("Security group rule already deleted: %s", rule.Description)
+			return nil
+		}
+		return fmt.Errorf("failed to delete firewall rule: %v", err)
+	}
+
+	return nil
 }
 
 func (ac *AliyunClient) ListFirewallRules(instanceID string) ([]*FirewallRuleResult, error) {
@@ -266,11 +272,6 @@ func (ac *AliyunClient) ListFirewallRules(instanceID string) ([]*FirewallRuleRes
 	if response.Body.Permissions != nil {
 		for _, permission := range response.Body.Permissions.Permission {
 			rule := &FirewallRuleResult{
-				RuleID: fmt.Sprintf("%s|%s|%s|%s",
-					securityGroupId,
-					tea.StringValue(permission.IpProtocol),
-					tea.StringValue(permission.PortRange),
-					tea.StringValue(permission.SourceCidrIp)),
 				Port:        ac.convertPortRange(tea.StringValue(permission.PortRange)),
 				Protocol:    strings.ToUpper(tea.StringValue(permission.IpProtocol)),
 				CidrBlock:   tea.StringValue(permission.SourceCidrIp),
