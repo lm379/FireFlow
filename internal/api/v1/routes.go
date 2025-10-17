@@ -16,6 +16,7 @@ func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallSe
 	configHandler.SetFirewallService(firewallService) // 设置防火墙服务
 	cloudConfigHandler := NewCloudConfigHandler(configService)
 	regionHandler := NewRegionHandler() // 创建地域处理器
+	serviceTypeHandler := NewServiceTypeHandler() // 创建服务类型处理器
 
 	// 防火墙规则路由
 	ruleRoutes := router.Group("/rules")
@@ -69,4 +70,7 @@ func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallSe
 	
 	// 云厂商路由
 	router.GET("/providers", regionHandler.GetProviders) // 获取云厂商列表
+	
+	// 服务类型路由
+	router.GET("/service-types", serviceTypeHandler.GetServiceTypesByProvider) // 根据提供商获取服务类型
 }

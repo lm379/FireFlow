@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.1.12
 	github.com/alibabacloud-go/ecs-20140526/v7 v7.2.1
+	github.com/alibabacloud-go/swas-open-20200601/v3 v3.0.0
 	github.com/alibabacloud-go/tea v1.3.12
 	github.com/gin-gonic/gin v1.11.0
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.171

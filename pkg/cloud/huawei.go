@@ -99,8 +99,13 @@ func (hc *HuaweiClient) CreateFirewallRule(instanceID string, rule *FirewallRule
 	if existingRule != nil {
 		// 如果IP相同，直接返回现有规则
 		if existingRule.CidrBlock == rule.CidrBlock {
-			log.Printf("Rule already exists with same IP (Protocol=%s, Port=%s, CidrBlock=%s), skipping creation",
-				existingRule.Protocol, existingRule.Port, existingRule.CidrBlock)
+			if existingRule.Description != rule.Description {
+				log.Printf("Rule already exists with same IP but different description (Protocol=%s, Port=%s, CidrBlock=%s). Existing description: %s, New description: %s. Consider updating the rule instead.",
+					existingRule.Protocol, existingRule.Port, existingRule.CidrBlock, existingRule.Description, rule.Description)
+			} else {
+				log.Printf("Rule already exists with same IP (Protocol=%s, Port=%s, CidrBlock=%s), skipping creation",
+					existingRule.Protocol, existingRule.Port, existingRule.CidrBlock)
+			}
 			return existingRule, nil
 		}
 
@@ -210,14 +215,21 @@ func (hc *HuaweiClient) UpdateFirewallRule(instanceID string, ruleSpec *Firewall
 		return nil, fmt.Errorf("failed to list existing rules: %v", err)
 	}
 
+	port, err := hc.parsePortRangeForVPC(ruleSpec.Port, ruleSpec.Protocol)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port range: %v", err)
+	}
+
 	// 查找匹配的规则
 	var targetRule *FirewallRuleResult
 	for _, rule := range existingRules {
-		if rule.Description == ruleSpec.Description &&
-			rule.Protocol == ruleSpec.Protocol &&
-			rule.Port == ruleSpec.Port {
+		if rule.Protocol == ruleSpec.Protocol && rule.Port == *port {
+			if ruleSpec.Port == "ALL" && rule.Description != ruleSpec.Description {
+				log.Printf("Found rule with matching protocol and port but different description (Protocol=%s, Port=%s). Existing description: %s, Target description: %s. Proceeding with update.",
+					rule.Protocol, rule.Port, rule.Description, ruleSpec.Description)
+			}
 			targetRule = rule
-			log.Printf("Found target rule: Description=%s, CidrBlock=%s", rule.Description, rule.CidrBlock)
+			// log.Printf("Found target rule: Description=%s, CidrBlock=%s", rule.Description, rule.CidrBlock)
 			break
 		}
 	}
@@ -239,7 +251,6 @@ func (hc *HuaweiClient) UpdateFirewallRule(instanceID string, ruleSpec *Firewall
 
 	log.Printf("IP mismatch detected: current=%s, target=%s, proceeding with update", targetRule.CidrBlock, newCidrBlock)
 
-	// 华为云安全组规则不支持直接更新，需要先删除再创建
 	err = hc.DeleteFirewallRuleBySpec(instanceID, targetRule)
 	if err != nil {
 		// 即使删除失败，也记录日志并继续创建新规则
@@ -374,76 +385,6 @@ func (hc *HuaweiClient) parsePortRangeForVPC(port, protocol string) (*string, er
 	return nil, nil
 }
 
-// parsePortRange 解析端口范围（保留用于兼容性）
-func (hc *HuaweiClient) parsePortRange(port, protocol string) (*int32, *int32, error) {
-	port = strings.TrimSpace(port)
-	protocol = strings.ToUpper(strings.TrimSpace(protocol))
-
-	// ICMP、GRE、ALL协议不需要端口
-	switch protocol {
-	case "ICMP", "GRE", "ALL":
-		return nil, nil, nil
-	}
-
-	// TCP和UDP协议处理端口
-	if protocol == "TCP" || protocol == "UDP" {
-		// 处理特殊值
-		switch strings.ToUpper(port) {
-		case "ALL", "":
-			return func() *int32 { i := int32(1); return &i }(), func() *int32 { i := int32(65535); return &i }(), nil
-		}
-
-		// 检查是否是逗号分隔的多个端口
-		if strings.Contains(port, ",") {
-			return nil, nil, fmt.Errorf("multiple ports separated by comma are not supported in single rule, please create separate rules for each port: %s", port)
-		}
-
-		// 检查是否是端口范围（如 8000-9000）
-		if strings.Contains(port, "-") {
-			parts := strings.Split(port, "-")
-			if len(parts) != 2 {
-				return nil, nil, fmt.Errorf("invalid port range format: %s", port)
-			}
-
-			startPort, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-			if err != nil {
-				return nil, nil, fmt.Errorf("invalid start port: %s", parts[0])
-			}
-
-			endPort, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-			if err != nil {
-				return nil, nil, fmt.Errorf("invalid end port: %s", parts[1])
-			}
-
-			if startPort < 1 || startPort > 65535 || endPort < 1 || endPort > 65535 {
-				return nil, nil, fmt.Errorf("port must be between 1 and 65535")
-			}
-
-			if startPort > endPort {
-				return nil, nil, fmt.Errorf("start port must be less than or equal to end port")
-			}
-
-			return func() *int32 { i := int32(startPort); return &i }(), func() *int32 { i := int32(endPort); return &i }(), nil
-		}
-
-		// 单个端口
-		portNum, err := strconv.Atoi(port)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid port number: %s", port)
-		}
-
-		if portNum < 1 || portNum > 65535 {
-			return nil, nil, fmt.Errorf("port must be between 1 and 65535")
-		}
-
-		portInt32 := int32(portNum)
-		return &portInt32, &portInt32, nil
-	}
-
-	// 其他协议不需要端口
-	return nil, nil, nil
-}
-
 // convertProtocol 将协议转换为华为云格式
 func (hc *HuaweiClient) convertProtocol(protocol string) *string {
 	switch strings.ToUpper(protocol) {
@@ -543,6 +484,18 @@ func (hc *HuaweiClient) checkFirewallRuleExists(instanceID string, rule *Firewal
 
 	// 检查是否存在相同的规则
 	for _, existing := range existingRules {
+
+		// 华为云仅允许一条端口为ALL的规则
+		if rule.Port == "ALL" && existing.Port == "1-65535" {
+			return existing, nil
+		}
+
+		existing.Port = hc.convertProtocolBack(&existing.Protocol)
+		// 华为云仅允许一条协议为ALL的规则
+		if rule.Protocol == "ALL" && existing.Protocol == "ALL" {
+			return existing, nil
+		}
+
 		if existing.Protocol == strings.ToUpper(rule.Protocol) &&
 			existing.Port == rule.Port &&
 			existing.Description == rule.Description {

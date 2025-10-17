@@ -8,19 +8,32 @@ import (
 
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
+	swas20200601 "github.com/alibabacloud-go/swas-open-20200601/v3/client"
 	"github.com/alibabacloud-go/tea/tea"
 )
 
 type AliyunConfig struct {
 	AccessKeyID      string `json:"accessKeyId" binding:"required"`
 	AccessKeySecret  string `json:"accessKeySecret" binding:"required"`
+	Type             int    `json:"type" binding:"required"` // 0：ECS，1：轻量云
 	RegionID         string `json:"regionId" binding:"required"`
 	SecurityGroupIds string `json:"securityGroupIds" binding:"required"`
 }
 
 type AliyunClient struct {
-	EcsClient *ecs20140526.Client
-	config    AliyunConfig
+	EcsClient  *ecs20140526.Client
+	SwasClient *swas20200601.Client
+	config     AliyunConfig
+}
+
+// SecurityGroupInfo 安全组信息结构体
+type SecurityGroupInfo struct {
+	SecurityGroupID string `json:"security_group_id"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	VpcID           string `json:"vpc_id"`
+	Region          string `json:"region"`
+	RulesCount      int    `json:"rules_count"`
 }
 
 // NewAliyunClient 创建阿里云客户端
@@ -44,16 +57,34 @@ func NewAliyunClient(config AliyunConfig) (*AliyunClient, error) {
 	// 设置地域
 	clientConfig.Endpoint = tea.String(fmt.Sprintf("ecs.%s.aliyuncs.com", config.RegionID))
 
-	// 初始化ECS客户端
-	ecsClient, err := ecs20140526.NewClient(clientConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Aliyun ECS client: %v", err)
+	switch config.Type {
+	case 0:
+		// ECS
+		clientConfig.Endpoint = tea.String(fmt.Sprintf("ecs.%s.aliyuncs.com", config.RegionID))
+		// 初始化ECS客户端
+		ecsClient, err := ecs20140526.NewClient(clientConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Aliyun ECS client: %v", err)
+		}
+		return &AliyunClient{
+			EcsClient: ecsClient,
+			config:    config,
+		}, nil
+	case 1:
+		// 轻量云
+		clientConfig.Endpoint = tea.String(fmt.Sprintf("swas.%s.aliyuncs.com", config.RegionID))
+		// 初始化轻量云客户端
+		swasClient, err := swas20200601.NewClient(clientConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Aliyun SWAS client: %v", err)
+		}
+		return &AliyunClient{
+			SwasClient: swasClient,
+			config:     config,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported Aliyun client type: %d", config.Type)
 	}
-
-	return &AliyunClient{
-		EcsClient: ecsClient,
-		config:    config,
-	}, nil
 }
 
 // GetConfig 获取阿里云客户端配置
@@ -71,6 +102,24 @@ func (ac *AliyunClient) GetConfig() AliyunConfig {
 
 // 实现 CloudProvider 接口
 func (ac *AliyunClient) GetInstance(instanceID string) (*InstanceInfo, error) {
+	switch ac.config.Type {
+	case 0:
+		// ECS 云服务器
+		return ac.getECSInstance(instanceID)
+	case 1:
+		// SWAS 轻量应用服务器
+		return ac.getSWASInstance(instanceID)
+	default:
+		return nil, fmt.Errorf("unsupported Aliyun client type: %d", ac.config.Type)
+	}
+}
+
+// getECSInstance 获取ECS实例信息
+func (ac *AliyunClient) getECSInstance(instanceID string) (*InstanceInfo, error) {
+	if ac.EcsClient == nil {
+		return nil, fmt.Errorf("ECS client not initialized")
+	}
+
 	request := &ecs20140526.DescribeInstancesRequest{
 		RegionId:    tea.String(ac.config.RegionID),
 		InstanceIds: tea.String(fmt.Sprintf(`["%s"]`, instanceID)),
@@ -109,7 +158,63 @@ func (ac *AliyunClient) GetInstance(instanceID string) (*InstanceInfo, error) {
 	return info, nil
 }
 
+// getSWASInstance 获取SWAS轻量应用服务器实例信息
+func (ac *AliyunClient) getSWASInstance(instanceID string) (*InstanceInfo, error) {
+	if ac.SwasClient == nil {
+		return nil, fmt.Errorf("SWAS client not initialized")
+	}
+
+	request := &swas20200601.ListInstancesRequest{
+		RegionId:    tea.String(ac.config.RegionID),
+		InstanceIds: tea.String(instanceID),
+	}
+
+	response, err := ac.SwasClient.ListInstances(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe SWAS instance: %v", err)
+	}
+
+	if response.Body.Instances == nil {
+		return nil, fmt.Errorf("SWAS instance %s not found", instanceID)
+	}
+
+	instance := response.Body.Instances[0]
+	info := &InstanceInfo{
+		InstanceID:   tea.StringValue(instance.InstanceId),
+		InstanceName: tea.StringValue(instance.InstanceName),
+		Status:       tea.StringValue(instance.Status),
+		Provider:     "Aliyun",
+		Region:       ac.config.RegionID,
+	}
+
+	// 获取公网IP
+	if instance.PublicIpAddress != nil {
+		info.PublicIP = tea.StringValue(instance.PublicIpAddress)
+	}
+
+	// 获取私网IP
+	if instance.InnerIpAddress != nil {
+		info.PrivateIP = tea.StringValue(instance.InnerIpAddress)
+	}
+
+	return info, nil
+}
+
 func (ac *AliyunClient) CreateFirewallRule(instanceID string, rule *FirewallRuleSpec) (*FirewallRuleResult, error) {
+	switch ac.config.Type {
+	case 0:
+		// ECS 云服务器
+		return ac.createECSFirewallRule(instanceID, rule)
+	case 1:
+		// SWAS 轻量应用服务器
+		return ac.createSWASFirewallRule(instanceID, rule)
+	default:
+		return nil, fmt.Errorf("unsupported Aliyun client type: %d", ac.config.Type)
+	}
+}
+
+// createECSFirewallRule 创建ECS防火墙规则
+func (ac *AliyunClient) createECSFirewallRule(instanceID string, rule *FirewallRuleSpec) (*FirewallRuleResult, error) {
 	// 获取实例的安全组
 	securityGroupId, err := ac.getInstanceSecurityGroup(instanceID)
 	if err != nil {
@@ -123,6 +228,46 @@ func (ac *AliyunClient) CreateFirewallRule(instanceID string, rule *FirewallRule
 	}
 
 	return ac.createSingleRule(instanceID, securityGroupId, rule, portRange)
+}
+
+// createSWASFirewallRule 创建SWAS防火墙规则
+func (ac *AliyunClient) createSWASFirewallRule(instanceID string, rule *FirewallRuleSpec) (*FirewallRuleResult, error) {
+	if ac.SwasClient == nil {
+		return nil, fmt.Errorf("SWAS client not initialized")
+	}
+
+	portRange, err := ac.parsePortRange(rule.Port, rule.Protocol)
+	if err != nil {
+		return nil, fmt.Errorf("invalid SWAS port range: %v", err)
+	}
+
+	firewallRules0 := &swas20200601.CreateFirewallRulesRequestFirewallRules{
+		RuleProtocol: tea.String(rule.Protocol), // 若传入ALL，自动转换为TCP+UDP，(阿里云接口不支持ALL协议)
+		Port:         tea.String(portRange),
+		SourceCidrIp: tea.String(rule.CidrBlock),
+		Remark:       tea.String(rule.Description),
+	}
+	request := &swas20200601.CreateFirewallRulesRequest{
+		RegionId:      tea.String(ac.config.RegionID),
+		InstanceId:    tea.String(instanceID),
+		FirewallRules: []*swas20200601.CreateFirewallRulesRequestFirewallRules{firewallRules0},
+	}
+
+	_, err = ac.SwasClient.CreateFirewallRules(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SWAS firewall rule: %v", err)
+	}
+
+	// 返回创建的规则信息
+	return &FirewallRuleResult{
+		Port:        rule.Port,
+		Protocol:    rule.Protocol,
+		CidrBlock:   rule.CidrBlock,
+		Action:      rule.Action,
+		Description: rule.Description,
+		Provider:    "Aliyun",
+		InstanceID:  instanceID,
+	}, nil
 }
 
 // createSingleRule 创建单个防火墙规则
@@ -160,13 +305,27 @@ func (ac *AliyunClient) DeleteFirewallRule(instanceID, ruleID string) error {
 }
 
 func (ac *AliyunClient) UpdateFirewallRule(instanceID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error) {
-	// log.Printf("Updating Aliyun firewall rule for instance %s with new IP %s", instanceID, newIP)
+	switch ac.config.Type {
+	case 0:
+		// ECS 云服务器
+		return ac.updateECSFirewallRule(instanceID, ruleSpec, newIP)
+	case 1:
+		// SWAS 轻量应用服务器
+		return ac.updateSWASFirewallRule(instanceID, ruleSpec, newIP)
+	default:
+		return nil, fmt.Errorf("unsupported Aliyun client type: %d", ac.config.Type)
+	}
+}
+
+// updateECSFirewallRule 更新ECS防火墙规则
+func (ac *AliyunClient) updateECSFirewallRule(instanceID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error) {
+	// log.Printf("Updating Aliyun ECS firewall rule for instance %s with new IP %s", instanceID, newIP)
 	// log.Printf("Rule spec: Protocol=%s, Port=%s, Description=%s", ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
 
 	// 先查询现有规则，通过描述匹配规则
-	existingRules, err := ac.ListFirewallRules(instanceID)
+	existingRules, err := ac.listECSFirewallRules(instanceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list existing rules: %v", err)
+		return nil, fmt.Errorf("failed to list existing ECS rules: %v", err)
 	}
 
 	// 查找匹配的规则
@@ -176,44 +335,116 @@ func (ac *AliyunClient) UpdateFirewallRule(instanceID string, ruleSpec *Firewall
 			rule.Protocol == ruleSpec.Protocol &&
 			rule.Port == ruleSpec.Port {
 			targetRule = rule
-			log.Printf("Found target rule: Description=%s, CidrBlock=%s", rule.Description, rule.CidrBlock)
+			log.Printf("Found target ECS rule: Description=%s, CidrBlock=%s", rule.Description, rule.CidrBlock)
 			break
 		}
 	}
 
 	if targetRule == nil {
 		// 规则不存在，可能已被手动删除，直接创建新规则
-		log.Printf("Rule with description '%s' not found in cloud, creating new rule", ruleSpec.Description)
+		log.Printf("ECS rule with description '%s' not found in cloud, creating new rule", ruleSpec.Description)
 		newRule := *ruleSpec
 		newRule.CidrBlock = fmt.Sprintf("%s/32", newIP)
-		return ac.CreateFirewallRule(instanceID, &newRule)
+		return ac.createECSFirewallRule(instanceID, &newRule)
 	}
 
 	// 检查IP是否已经一致
 	newCidrBlock := fmt.Sprintf("%s/32", newIP)
 	if targetRule.CidrBlock == newCidrBlock {
-		log.Printf("Rule with description '%s' already has the correct IP %s, skipping update", ruleSpec.Description, newIP)
+		log.Printf("ECS rule with description '%s' already has the correct IP %s, skipping update", ruleSpec.Description, newIP)
 		return targetRule, nil
 	}
 
 	// log.Printf("IP mismatch detected: current=%s, target=%s, proceeding with update", targetRule.CidrBlock, newCidrBlock)
 
 	// 先删除现有规则
-	err = ac.DeleteFirewallRuleBySpec(instanceID, targetRule)
+	err = ac.deleteECSFirewallRule(instanceID, targetRule)
 	if err != nil {
 		// 即使删除失败，也记录日志并继续创建新规则
-		log.Printf("Warning: failed to delete old rule with description '%s': %v", ruleSpec.Description, err)
+		log.Printf("Warning: failed to delete old ECS rule with description '%s': %v", ruleSpec.Description, err)
 	}
 
 	// 更新CIDR块为新IP
 	newRule := *ruleSpec
 	newRule.CidrBlock = newCidrBlock
 
-	return ac.CreateFirewallRule(instanceID, &newRule)
+	return ac.createECSFirewallRule(instanceID, &newRule)
+}
+
+// updateSWASFirewallRule 更新SWAS防火墙规则
+func (ac *AliyunClient) updateSWASFirewallRule(instanceID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error) {
+	if ac.SwasClient == nil {
+		return nil, fmt.Errorf("SWAS client not initialized")
+	}
+
+	// log.Printf("Updating Aliyun SWAS firewall rule for instance %s with new IP %s", instanceID, newIP)
+	// log.Printf("Rule spec: Protocol=%s, Port=%s, Description=%s", ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
+
+	// 先查询现有规则，通过描述匹配规则
+	existingRules, err := ac.listSWASFirewallRules(instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing SWAS rules: %v", err)
+	}
+
+	// 查找匹配的规则
+	var targetRule *FirewallRuleResult
+	for _, rule := range existingRules {
+		if rule.Description == ruleSpec.Description &&
+			rule.Protocol == ruleSpec.Protocol &&
+			rule.Port == ruleSpec.Port {
+			targetRule = rule
+			log.Printf("Found target SWAS rule: Description=%s, CidrBlock=%s", rule.Description, rule.CidrBlock)
+			break
+		}
+	}
+
+	if targetRule == nil {
+		// 规则不存在，可能已被手动删除，直接创建新规则
+		log.Printf("SWAS rule with description '%s' not found in cloud, creating new rule", ruleSpec.Description)
+		newRule := *ruleSpec
+		newRule.CidrBlock = fmt.Sprintf("%s/32", newIP)
+		return ac.createSWASFirewallRule(instanceID, &newRule)
+	}
+
+	// 检查IP是否已经一致
+	newCidrBlock := fmt.Sprintf("%s/32", newIP)
+	if targetRule.CidrBlock == newCidrBlock {
+		log.Printf("SWAS rule with description '%s' already has the correct IP %s, skipping update", ruleSpec.Description, newIP)
+		return targetRule, nil
+	}
+
+	// log.Printf("IP mismatch detected: current=%s, target=%s, proceeding with update", targetRule.CidrBlock, newCidrBlock)
+
+	// 先删除现有规则
+	err = ac.deleteSWASFirewallRule(instanceID, targetRule)
+	if err != nil {
+		// 即使删除失败，也记录日志并继续创建新规则
+		log.Printf("Warning: failed to delete old SWAS rule with description '%s': %v", ruleSpec.Description, err)
+	}
+
+	// 更新CIDR块为新IP
+	newRule := *ruleSpec
+	newRule.CidrBlock = newCidrBlock
+
+	return ac.createSWASFirewallRule(instanceID, &newRule)
 }
 
 // 通过规则规格删除防火墙规则
 func (ac *AliyunClient) DeleteFirewallRuleBySpec(instanceID string, rule *FirewallRuleResult) error {
+	switch ac.config.Type {
+	case 0:
+		// ECS 云服务器
+		return ac.deleteECSFirewallRule(instanceID, rule)
+	case 1:
+		// SWAS 轻量应用服务器
+		return ac.deleteSWASFirewallRule(instanceID, rule)
+	default:
+		return fmt.Errorf("unsupported Aliyun client type: %d", ac.config.Type)
+	}
+}
+
+// deleteECSFirewallRule 删除ECS防火墙规则
+func (ac *AliyunClient) deleteECSFirewallRule(instanceID string, rule *FirewallRuleResult) error {
 	// 获取实例的安全组
 	securityGroupId, err := ac.getInstanceSecurityGroup(instanceID)
 	if err != nil {
@@ -245,13 +476,119 @@ func (ac *AliyunClient) DeleteFirewallRuleBySpec(instanceID string, rule *Firewa
 			// log.Printf("Security group rule already deleted: %s", rule.Description)
 			return nil
 		}
-		return fmt.Errorf("failed to delete firewall rule: %v", err)
+		return fmt.Errorf("failed to delete ECS firewall rule: %v", err)
 	}
 
 	return nil
 }
 
+// deleteSWASFirewallRule 删除SWAS防火墙规则
+func (ac *AliyunClient) deleteSWASFirewallRule(instanceID string, rule *FirewallRuleResult) error {
+	if ac.SwasClient == nil {
+		return fmt.Errorf("SWAS client not initialized")
+	}
+
+	// 获取SWAS防火墙规则ID
+	ruleID, err := ac.findSWASRuleID(instanceID, rule)
+	if err != nil {
+		return fmt.Errorf("failed to find SWAS rule ID: %v", err)
+	}
+
+	if ruleID == "" {
+		// 规则不存在，认为删除成功
+		return nil
+	}
+
+	request := &swas20200601.DeleteFirewallRuleRequest{
+		InstanceId: tea.String(instanceID),
+		RegionId:   tea.String(ac.config.RegionID),
+		RuleId:     tea.String(ruleID),
+	}
+
+	_, err = ac.SwasClient.DeleteFirewallRule(request)
+	if err != nil {
+		// 检查是否是规则不存在的错误
+		errStr := err.Error()
+		if strings.Contains(errStr, "NotFound") ||
+			strings.Contains(errStr, "does not exist") {
+			// 规则已经不存在，认为删除成功
+			return nil
+		}
+		return fmt.Errorf("failed to delete SWAS firewall rule: %v", err)
+	}
+
+	return nil
+}
+
+// findSWASRuleID 查找匹配的SWAS防火墙规则ID
+func (ac *AliyunClient) findSWASRuleID(instanceID string, targetRule *FirewallRuleResult) (string, error) {
+	if ac.SwasClient == nil {
+		return "", fmt.Errorf("SWAS client not initialized")
+	}
+
+	request := &swas20200601.ListFirewallRulesRequest{
+		InstanceId: tea.String(instanceID),
+		RegionId:   tea.String(ac.config.RegionID),
+	}
+
+	response, err := ac.SwasClient.ListFirewallRules(request)
+	if err != nil {
+		return "", fmt.Errorf("failed to list SWAS firewall rules: %v", err)
+	}
+
+	if response.Body == nil || response.Body.FirewallRules == nil {
+		return "", nil
+	}
+
+	// 解析目标规则的端口范围
+	targetPortRange, err := ac.parsePortRange(targetRule.Port, targetRule.Protocol)
+	if err != nil {
+		return "", fmt.Errorf("invalid target port range: %v", err)
+	}
+
+	// 查找匹配的规则
+	for _, rule := range response.Body.FirewallRules {
+		if rule.RuleProtocol != nil && rule.Port != nil && rule.SourceCidrIp != nil {
+			// 比较协议（忽略大小写）
+			if !strings.EqualFold(*rule.RuleProtocol, targetRule.Protocol) {
+				continue
+			}
+
+			// 比较端口
+			if *rule.Port != targetPortRange {
+				continue
+			}
+
+			// 比较CIDR
+			if *rule.SourceCidrIp != targetRule.CidrBlock {
+				continue
+			}
+
+			// 找到匹配的规则，返回RuleId
+			if rule.RuleId != nil {
+				return *rule.RuleId, nil
+			}
+		}
+	}
+
+	return "", nil // 没有找到匹配的规则
+}
+
 func (ac *AliyunClient) ListFirewallRules(instanceID string) ([]*FirewallRuleResult, error) {
+	switch ac.config.Type {
+	case 0:
+		// ECS 云服务器
+		return ac.listECSFirewallRules(instanceID)
+	case 1:
+		// SWAS 轻量应用服务器
+		return ac.listSWASFirewallRules(instanceID)
+	default:
+		return nil, fmt.Errorf("unsupported Aliyun client type: %d", ac.config.Type)
+	}
+}
+
+// listECSFirewallRules 获取ECS防火墙规则列表
+func (ac *AliyunClient) listECSFirewallRules(instanceID string) ([]*FirewallRuleResult, error) {
 	// 获取实例的安全组
 	securityGroupId, err := ac.getInstanceSecurityGroup(instanceID)
 	if err != nil {
@@ -265,7 +602,7 @@ func (ac *AliyunClient) ListFirewallRules(instanceID string) ([]*FirewallRuleRes
 
 	response, err := ac.EcsClient.DescribeSecurityGroupAttribute(request)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list firewall rules: %v", err)
+		return nil, fmt.Errorf("failed to list ECS firewall rules: %v", err)
 	}
 
 	var rules []*FirewallRuleResult
@@ -287,7 +624,39 @@ func (ac *AliyunClient) ListFirewallRules(instanceID string) ([]*FirewallRuleRes
 	return rules, nil
 }
 
-// 辅助方法
+// listSWASFirewallRules 获取SWAS防火墙规则列表
+func (ac *AliyunClient) listSWASFirewallRules(instanceID string) ([]*FirewallRuleResult, error) {
+	if ac.SwasClient == nil {
+		return nil, fmt.Errorf("SWAS client not initialized")
+	}
+
+	request := &swas20200601.ListFirewallRulesRequest{
+		InstanceId: tea.String(instanceID),
+	}
+
+	response, err := ac.SwasClient.ListFirewallRules(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list SWAS firewall rules: %v", err)
+	}
+
+	var rules []*FirewallRuleResult
+	if response.Body.FirewallRules != nil {
+		for _, rule := range response.Body.FirewallRules {
+			result := &FirewallRuleResult{
+				Port:        tea.StringValue(rule.Port),
+				Protocol:    strings.ToUpper(tea.StringValue(rule.RuleProtocol)),
+				CidrBlock:   tea.StringValue(rule.SourceCidrIp),
+				Action:      "ACCEPT", // SWAS通常只有允许规则
+				Description: tea.StringValue(rule.Remark),
+				Provider:    "Aliyun",
+				InstanceID:  instanceID,
+			}
+			rules = append(rules, result)
+		}
+	}
+
+	return rules, nil
+}
 
 // getInstanceSecurityGroup 获取实例的安全组ID
 func (ac *AliyunClient) getInstanceSecurityGroup(instanceID string) (string, error) {
@@ -443,14 +812,4 @@ func (ac *AliyunClient) ValidateSecurityGroup(securityGroupId string) (*Security
 	}
 
 	return sgInfo, nil
-}
-
-// SecurityGroupInfo 安全组信息结构体
-type SecurityGroupInfo struct {
-	SecurityGroupID string `json:"security_group_id"`
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	VpcID           string `json:"vpc_id"`
-	Region          string `json:"region"`
-	RulesCount      int    `json:"rules_count"`
 }

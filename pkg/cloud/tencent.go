@@ -14,6 +14,7 @@ import (
 type TencentConfig struct {
 	SecretId   string `json:"secretId"`
 	SecretKey  string `json:"secretKey"`
+	Type       int    `json:"type"` // 0：ECS(云服务器)，1：轻量应用服务器
 	Region     string `json:"region"`
 	InstanceId string `json:"instanceId"` // 实例ID
 }
@@ -83,24 +84,32 @@ func NewTencentClient(config TencentConfig) (*TencentClient, error) {
 		config.Region = "ap-beijing" // 默认北京区域
 	}
 
-	// log.Printf("Initializing Tencent Cloud client with SecretId: %s, Region: %s",
-	// 	maskSecretId(config.SecretId), config.Region)
+	// log.Printf("Initializing Tencent Cloud client with SecretId: %s, Region: %s, Type: %d",
+	// 	maskSecretId(config.SecretId), config.Region, config.Type)
 
 	// 创建认证信息
 	credential := common.NewCredential(config.SecretId, config.SecretKey)
 
-	// 初始化Lighthouse客户端
-	cpfLighthouse := profile.NewClientProfile()
-	cpfLighthouse.HttpProfile.Endpoint = "lighthouse.tencentcloudapi.com"
-	lighthouseClient, err := lighthouse.NewClient(credential, config.Region, cpfLighthouse)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Lighthouse client: %v", err)
-	}
+	switch config.Type {
+	case 0:
+		// ECS(云服务器) - 暂时留空，未实现
+		return nil, fmt.Errorf("腾讯云ECS(云服务器)暂未实现，请使用轻量应用服务器(Type=1)")
+	case 1:
+		// 轻量应用服务器 (Lighthouse)
+		cpfLighthouse := profile.NewClientProfile()
+		cpfLighthouse.HttpProfile.Endpoint = "lighthouse.tencentcloudapi.com"
+		lighthouseClient, err := lighthouse.NewClient(credential, config.Region, cpfLighthouse)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Lighthouse client: %v", err)
+		}
 
-	return &TencentClient{
-		config:           config,
-		lighthouseClient: lighthouseClient,
-	}, nil
+		return &TencentClient{
+			config:           config,
+			lighthouseClient: lighthouseClient,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported Tencent Cloud client type: %d, supported types: 0(ECS-未实现), 1(轻量应用服务器)", config.Type)
+	}
 }
 
 // 实现 CloudProvider 接口

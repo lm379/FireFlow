@@ -22,6 +22,7 @@ type CloudProviderConfig struct {
 	SecretId    string `gorm:"type:varchar(255);comment:访问密钥ID" json:"secret_id"`
 	SecretKey   string `gorm:"type:varchar(255);comment:访问密钥Key" json:"secret_key"`
 	Region      string `gorm:"type:varchar(100);comment:区域" json:"region"`
+	Type        int    `gorm:"default:0;comment:实例类型(ECS:0,轻量云:1)" json:"type"`
 	InstanceId  string `gorm:"type:varchar(255);comment:实例ID" json:"instance_id"`
 	ProjectID   string `gorm:"type:varchar(255);comment:项目ID(仅华为云)" json:"project_id"`
 	Extra       string `gorm:"type:text;comment:额外配置(JSON格式)" json:"extra"`
