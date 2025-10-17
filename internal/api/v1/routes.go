@@ -15,62 +15,60 @@ func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallSe
 	configHandler := NewConfigHandler(configService, cronManager)
 	configHandler.SetFirewallService(firewallService) // 设置防火墙服务
 	cloudConfigHandler := NewCloudConfigHandler(configService)
-	regionHandler := NewRegionHandler() // 创建地域处理器
+	regionHandler := NewRegionHandler()           // 创建地域处理器
 	serviceTypeHandler := NewServiceTypeHandler() // 创建服务类型处理器
 
 	// 防火墙规则路由
 	ruleRoutes := router.Group("/rules")
 	{
-		ruleRoutes.GET("/", firewallHandler.GetRules)
-		ruleRoutes.GET("/:id", firewallHandler.GetRule)
-		ruleRoutes.POST("/", firewallHandler.CreateRule)
-		ruleRoutes.PUT("/:id", firewallHandler.UpdateRule)
-		ruleRoutes.DELETE("/:id", firewallHandler.DeleteRule)
-		ruleRoutes.POST("/:id/execute", firewallHandler.ExecuteRule)
-		ruleRoutes.POST("/sync", firewallHandler.SyncRules)
+		ruleRoutes.GET("/", firewallHandler.GetRules)         // GET /api/v1/rules
+		ruleRoutes.GET("/:id", firewallHandler.GetRule)       // GET /api/v1/rules/:id
+		ruleRoutes.POST("/", firewallHandler.CreateRule)      // POST /api/v1/rules
+		ruleRoutes.PUT("/:id", firewallHandler.UpdateRule)    // PUT /api/v1/rules/:id
+		ruleRoutes.DELETE("/:id", firewallHandler.DeleteRule) // DELETE /api/v1/rules/:id
+		ruleRoutes.PATCH("/:id", firewallHandler.ExecuteRule) // PATCH /api/v1/rules/:id (action=execute)
 	}
 
 	// 云服务配置路由
 	cloudConfigRoutes := router.Group("/cloud-configs")
 	{
-		cloudConfigRoutes.GET("/", cloudConfigHandler.GetCloudConfigs)
-		cloudConfigRoutes.GET("/:id", cloudConfigHandler.GetCloudConfig)
-		cloudConfigRoutes.POST("/", cloudConfigHandler.CreateCloudConfig)
-		cloudConfigRoutes.PUT("/:id", cloudConfigHandler.UpdateCloudConfig)
-		cloudConfigRoutes.DELETE("/:id", cloudConfigHandler.DeleteCloudConfig)
-		cloudConfigRoutes.POST("/:id/test", cloudConfigHandler.TestCloudConfig)
+		cloudConfigRoutes.GET("/", cloudConfigHandler.GetCloudConfigs)             // GET /api/v1/cloud-configs
+		cloudConfigRoutes.GET("/:id", cloudConfigHandler.GetCloudConfig)           // GET /api/v1/cloud-configs/:id
+		cloudConfigRoutes.POST("/", cloudConfigHandler.CreateCloudConfig)          // POST /api/v1/cloud-configs
+		cloudConfigRoutes.PUT("/:id", cloudConfigHandler.UpdateCloudConfig)        // PUT /api/v1/cloud-configs/:id
+		cloudConfigRoutes.DELETE("/:id", cloudConfigHandler.DeleteCloudConfig)     // DELETE /api/v1/cloud-configs/:id
+		cloudConfigRoutes.POST("/:id/actions", cloudConfigHandler.TestCloudConfig) // POST /api/v1/cloud-configs/:id/actions (action=test)
 	}
 
 	// 配置路由
-	configRoutes := router.Group("/config")
+	configRoutes := router.Group("/configs")
 	{
-		configRoutes.GET("/:key", configHandler.GetConfig)
-		configRoutes.POST("/", configHandler.SetConfig)
-		configRoutes.GET("/category/:category", configHandler.GetConfigsByCategory)
+		configRoutes.GET("/", configHandler.GetConfigs)    // GET /api/v1/configs?category=xxx
+		configRoutes.GET("/:key", configHandler.GetConfig) // GET /api/v1/configs/:key
+		configRoutes.PUT("/:key", configHandler.SetConfig) // PUT /api/v1/configs/:key
+		// 保持向后兼容的旧路由
+		configRoutes.GET("/category/:category", configHandler.GetConfigsByCategory) // 兼容旧API
 	}
 
 	// 系统配置路由
-	systemRoutes := router.Group("/system-config")
+	systemRoutes := router.Group("/system")
 	{
-		systemRoutes.GET("/", configHandler.GetSystemConfig)
-		systemRoutes.PUT("/", configHandler.SetSystemConfig)
-	}
+		systemRoutes.GET("/config", configHandler.GetSystemConfig) // GET /api/v1/system/config
+		systemRoutes.PUT("/config", configHandler.SetSystemConfig) // PUT /api/v1/system/config
 
-	// IP同步路由
-	router.POST("/sync-ip/", configHandler.SyncIPNow)
-	router.GET("/current-ip/", configHandler.GetCurrentIP)
+		// IP相关路由
+		systemRoutes.GET("/ip/current", configHandler.GetCurrentIP) // GET /api/v1/system/ip/current
+		systemRoutes.POST("/ip/sync", configHandler.SyncIPNow)      // POST /api/v1/system/ip/sync
+	}
 
 	// 地域相关路由
 	regionRoutes := router.Group("/regions")
 	{
-		regionRoutes.GET("", regionHandler.GetRegions)        // 获取地域列表
-		regionRoutes.GET("/search", regionHandler.SearchRegions) // 搜索地域
-		regionRoutes.GET("/detail", regionHandler.GetRegionByCode) // 获取地域详情
+		regionRoutes.GET("/", regionHandler.SearchRegions)        // GET /api/v1/regions?provider=xxx&search=keyword
+		regionRoutes.GET("/:code", regionHandler.GetRegionByCode) // GET /api/v1/regions/:code?provider=xxx
 	}
-	
+
 	// 云厂商路由
-	router.GET("/providers", regionHandler.GetProviders) // 获取云厂商列表
-	
-	// 服务类型路由
-	router.GET("/service-types", serviceTypeHandler.GetServiceTypesByProvider) // 根据提供商获取服务类型
+	router.GET("/providers", regionHandler.GetProviders)                                           // GET /api/v1/providers
+	router.GET("/providers/:provider/service-types", serviceTypeHandler.GetServiceTypesByProvider) // GET /api/v1/providers/:provider/service-types
 }

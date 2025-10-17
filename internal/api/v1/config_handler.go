@@ -43,7 +43,7 @@ type SetConfigRequest struct {
 
 // 通用配置接口
 
-// GetConfig 获取配置值
+// GetConfig 获取配置值 - GET /api/v1/configs/:key
 func (h *ConfigHandler) GetConfig(c *gin.Context) {
 	key := c.Param("key")
 	if key == "" {
@@ -63,24 +63,59 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 	})
 }
 
-// SetConfig 设置配置值
+// SetConfig 设置配置值 - PUT /api/v1/configs/:key
 func (h *ConfigHandler) SetConfig(c *gin.Context) {
-	var req SetConfigRequest
+	key := c.Param("key")
+	if key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "配置键名不能为空"})
+		return
+	}
+
+	var req struct {
+		Value       string `json:"value"`
+		Type        string `json:"type"`
+		Category    string `json:"category"`
+		Description string `json:"description"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误: " + err.Error()})
 		return
 	}
 
-	err := h.configService.SetConfig(req.Key, req.Value, req.Type, req.Category, req.Description)
+	err := h.configService.SetConfig(key, req.Value, req.Type, req.Category, req.Description)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存配置失败: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "配置保存成功"})
+	c.JSON(http.StatusOK, gin.H{
+		"key":     key,
+		"value":   req.Value,
+		"message": "配置保存成功",
+	})
 }
 
-// GetConfigsByCategory 获取分类配置
+// GetConfigs 获取配置列表 - GET /api/v1/configs?category=xxx
+func (h *ConfigHandler) GetConfigs(c *gin.Context) {
+	category := c.Query("category")
+	if category == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "配置分类不能为空"})
+		return
+	}
+
+	configs, err := h.configService.GetConfigsByCategory(category)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取配置失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"category": category,
+		"configs":  configs,
+	})
+}
+
+// GetConfigsByCategory 获取分类配置 (保持向后兼容)
 func (h *ConfigHandler) GetConfigsByCategory(c *gin.Context) {
 	category := c.Param("category")
 	if category == "" {
@@ -102,7 +137,7 @@ func (h *ConfigHandler) GetConfigsByCategory(c *gin.Context) {
 
 // 系统配置接口
 
-// GetSystemConfig 获取系统配置
+// GetSystemConfig 获取系统配置 - GET /api/v1/system/config
 func (h *ConfigHandler) GetSystemConfig(c *gin.Context) {
 	configs, err := h.configService.GetConfigsByCategory("system")
 	if err != nil {
@@ -130,7 +165,7 @@ func (h *ConfigHandler) GetSystemConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// SetSystemConfig 设置系统配置
+// SetSystemConfig 设置系统配置 - PUT /api/v1/system/config
 func (h *ConfigHandler) SetSystemConfig(c *gin.Context) {
 	var configMap map[string]interface{}
 	if err := c.ShouldBindJSON(&configMap); err != nil {
@@ -177,7 +212,7 @@ func (h *ConfigHandler) SetSystemConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "系统配置保存成功"})
 }
 
-// GetCurrentIP 获取当前公网IP
+// GetCurrentIP 获取当前公网IP - GET /api/v1/system/ip/current
 func (h *ConfigHandler) GetCurrentIP(c *gin.Context) {
 	// 获取IP获取URL配置
 	ipFetchURL, err := h.configService.GetConfig("ip_fetch_url")
@@ -222,7 +257,7 @@ func (h *ConfigHandler) GetCurrentIP(c *gin.Context) {
 	})
 }
 
-// SyncIPNow 立即获取并同步IP到防火墙规则
+// SyncIPNow 立即获取并同步IP到防火墙规则 - POST /api/v1/system/ip/sync
 func (h *ConfigHandler) SyncIPNow(c *gin.Context) {
 	// 检查防火墙服务是否可用
 	if h.firewallService == nil {

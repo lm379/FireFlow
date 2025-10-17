@@ -96,20 +96,20 @@ func (h *RegionHandler) GetRegions(c *gin.Context) {
 }
 
 // SearchRegions 搜索地域
-// @Summary 搜索地域
-// @Description 根据关键词模糊搜索地域，支持按云厂商筛选
+// @Summary 获取地域列表(支持搜索)
+// @Description 获取地域列表，支持按关键词搜索 - GET /api/v1/regions?provider=xxx&search=keyword
 // @Tags regions
 // @Accept json
 // @Produce json
 // @Param provider query string false "云厂商" Enums(aliyun, tencent, huawei)
-// @Param keyword query string false "搜索关键词"
+// @Param search query string false "搜索关键词"
 // @Param page query int false "页码" default(1)
 // @Param limit query int false "每页数量" default(20)
 // @Success 200 {object} SearchRegionResponse
-// @Router /api/v1/regions/search [get]
+// @Router /api/v1/regions [get]
 func (h *RegionHandler) SearchRegions(c *gin.Context) {
 	provider := c.Query("provider")
-	keyword := c.Query("keyword")
+	keyword := c.Query("search") // 改为使用search参数
 
 	// 分页参数
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -164,18 +164,18 @@ func (h *RegionHandler) GetProviders(c *gin.Context) {
 }
 
 // GetRegionByCode 根据代码获取地域信息
-// @Summary 根据代码获取地域信息
-// @Description 根据云厂商和地域代码获取地域详细信息
+// @Summary 获取地区详情
+// @Description 根据地域代码获取具体地域信息 - GET /api/v1/regions/:code?provider=xxx
 // @Tags regions
 // @Accept json
 // @Produce json
+// @Param code path string true "地域代码"  
 // @Param provider query string true "云厂商"
-// @Param code query string true "地域代码"
 // @Success 200 {object} map[string]interface{}
-// @Router /api/v1/regions/detail [get]
+// @Router /api/v1/regions/{code} [get]
 func (h *RegionHandler) GetRegionByCode(c *gin.Context) {
 	provider := c.Query("provider")
-	code := c.Query("code")
+	code := c.Param("code") // 改为从路径参数获取
 
 	if provider == "" || code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{

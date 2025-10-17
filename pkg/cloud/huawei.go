@@ -410,21 +410,21 @@ func (hc *HuaweiClient) convertProtocolBack(protocol *string) string {
 }
 
 // convertPortRange 将华为云的端口范围转换为通用格式
-func (hc *HuaweiClient) convertPortRangeBack(portMin, portMax *int32) string {
-	if portMin == nil || portMax == nil {
-		return "ALL"
-	}
+// func (hc *HuaweiClient) convertPortRangeBack(portMin, portMax *int32) string {
+// 	if portMin == nil || portMax == nil {
+// 		return "ALL"
+// 	}
 
-	if *portMin == 1 && *portMax == 65535 {
-		return "ALL"
-	}
+// 	if *portMin == 1 && *portMax == 65535 {
+// 		return "ALL"
+// 	}
 
-	if *portMin == *portMax {
-		return fmt.Sprintf("%d", *portMin)
-	}
+// 	if *portMin == *portMax {
+// 		return fmt.Sprintf("%d", *portMin)
+// 	}
 
-	return fmt.Sprintf("%d-%d", *portMin, *portMax)
-}
+// 	return fmt.Sprintf("%d-%d", *portMin, *portMax)
+// }
 
 // findSecurityGroupRuleID 查找安全组规则ID
 func (hc *HuaweiClient) findSecurityGroupRuleID(securityGroupID string, rule *FirewallRuleResult) (string, error) {

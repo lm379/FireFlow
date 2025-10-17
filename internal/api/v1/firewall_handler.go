@@ -170,12 +170,26 @@ func (h *FirewallHandler) UpdateRule(c *gin.Context) {
 	c.JSON(http.StatusOK, rule)
 }
 
-// ExecuteRule handles POST /api/v1/rules/:id/execute
+// ExecuteRule handles PATCH /api/v1/rules/:id (with action=execute)
 func (h *FirewallHandler) ExecuteRule(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	// Check if this is an execute action
+	var actionReq struct {
+		Action string `json:"action"`
+	}
+	if err := c.ShouldBindJSON(&actionReq); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if actionReq.Action != "execute" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action. Expected 'execute'"})
 		return
 	}
 
@@ -186,13 +200,4 @@ func (h *FirewallHandler) ExecuteRule(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
-}
-
-// SyncRules handles POST /api/v1/rules/sync
-func (h *FirewallHandler) SyncRules(c *gin.Context) {
-	if err := h.service.SyncCloudRules(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "Rules synchronized successfully"})
 }

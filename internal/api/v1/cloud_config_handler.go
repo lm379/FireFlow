@@ -105,12 +105,25 @@ func (h *CloudConfigHandler) DeleteCloudConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Cloud config deleted successfully"})
 }
 
-// TestCloudConfig 测试云服务配置连接
+// TestCloudConfig 测试云服务配置连接 - POST /api/v1/cloud-configs/:id/actions with action=test
 func (h *CloudConfigHandler) TestCloudConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	var actionReq struct {
+		Action string `json:"action"`
+	}
+	if err := c.ShouldBindJSON(&actionReq); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if actionReq.Action != "test" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action. Expected 'test'"})
 		return
 	}
 

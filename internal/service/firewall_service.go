@@ -348,16 +348,32 @@ func (s *FirewallService) getTencentClient(cloudConfigID uint) (*cloud.TencentCl
 		return nil, fmt.Errorf("failed to get cloud config: %v", err)
 	}
 
+	// 根据Type字段验证配置类型
+	var serverTypeDesc string
+	switch cloudConfig.Type {
+	case 0:
+		serverTypeDesc = "CVM"
+	case 1:
+		serverTypeDesc = "轻量应用服务器"
+	default:
+		serverTypeDesc = "未知类型"
+	}
+
 	// 构建腾讯云配置
 	tencentConfig := cloud.TencentConfig{
 		SecretId:   cloudConfig.SecretId,
 		SecretKey:  cloudConfig.SecretKey,
+		Type:       cloudConfig.Type,
 		Region:     cloudConfig.Region,
 		InstanceId: cloudConfig.InstanceId,
 	}
 
 	// 创建腾讯云客户端
-	return cloud.NewTencentClient(tencentConfig)
+	client, err := cloud.NewTencentClient(tencentConfig)
+	if err != nil {
+		return nil, fmt.Errorf("创建腾讯云客户端失败 (%s): %v", serverTypeDesc, err)
+	}
+	return client, nil
 }
 
 // The following methods are for the API
@@ -386,7 +402,7 @@ func (s *FirewallService) CreateRule(rule *model.FirewallRule) error {
 			rule.ProjectID = cloudConfig.ProjectID
 		}
 	}
-	
+
 	return s.repo.Create(rule)
 }
 
@@ -452,7 +468,7 @@ func (s *FirewallService) ExecuteRule(id uint) (map[string]interface{}, error) {
 		cloudIP := strings.TrimSuffix(cloudResult.CidrBlock, "/32")
 
 		if cloudIP == currentIP {
-			result["message"] = "IP未变动，防火墙规则已确认"
+			result["message"] = "IP未变动"
 			result["ip_changed"] = false
 			result["status"] = "unchanged"
 			result["cloud_ip"] = cloudIP
@@ -503,28 +519,6 @@ func (s *FirewallService) CreateTencentFirewallRule(instanceID, port, cidrBlock,
 	}
 
 	return s.repo.Create(rule)
-}
-
-// SyncTencentFirewallRules synchronizes firewall rules from Tencent Cloud with local database
-func (s *FirewallService) SyncTencentFirewallRules(instanceID string) error {
-	if s.tencentClient == nil {
-		return fmt.Errorf("sync tencent firewall rules failed, tencent cloud client not initialized")
-	}
-
-	// 从腾讯云获取防火墙规则
-	rules, err := s.tencentClient.ListFirewallRules(instanceID)
-	if err != nil {
-		return fmt.Errorf("failed to list firewall rules from Tencent Cloud: %v", err)
-	}
-
-	// log.Printf("Found %d firewall rules for instance %s", len(rules), instanceID)
-
-	for _, rule := range rules {
-		log.Printf("Rule: Port: %s, Protocol: %s, CIDR: %s",
-			rule.Port, rule.Protocol, rule.CidrBlock)
-	}
-
-	return nil
 }
 
 // GetInstanceInfo gets information about a cloud instance
@@ -672,15 +666,31 @@ func (s *FirewallService) getAliyunClient(cloudConfigID uint) (*cloud.AliyunClie
 		return nil, fmt.Errorf("invalid provider: expected Aliyun, got %s", config.Provider)
 	}
 
+	// 根据Type字段验证配置类型
+	var serverTypeDesc string
+	switch config.Type {
+	case 0:
+		serverTypeDesc = "ECS"
+	case 1:
+		serverTypeDesc = "轻量应用服务器"
+	default:
+		serverTypeDesc = "未知类型"
+	}
+
 	// 解析阿里云配置
 	aliyunConfig := cloud.AliyunConfig{
 		AccessKeyID:      config.SecretId,
 		AccessKeySecret:  config.SecretKey,
 		RegionID:         config.Region,
+		Type:             config.Type,
 		SecurityGroupIds: config.InstanceId, // 在云配置中，实例ID字段用于存储安全组ID
 	}
 
-	return cloud.NewAliyunClient(aliyunConfig)
+	client, err := cloud.NewAliyunClient(aliyunConfig)
+	if err != nil {
+		return nil, fmt.Errorf("创建阿里云客户端失败 (%s): %v", serverTypeDesc, err)
+	}
+	return client, nil
 }
 
 // GetAliyunInstanceInfo 获取阿里云实例信息
@@ -714,6 +724,17 @@ func (s *FirewallService) getHuaweiClient(cloudConfigID uint) (*cloud.HuaweiClie
 		return nil, fmt.Errorf("invalid provider: expected HuaweiCloud, got %s", config.Provider)
 	}
 
+	// 根据Type字段验证配置类型（华为云类型字段无效，但仍显示）
+	var serverTypeDesc string
+	switch config.Type {
+	case 0:
+		serverTypeDesc = "ECS/Flexus"
+	case 1:
+		serverTypeDesc = "其他"
+	default:
+		serverTypeDesc = "华为云未知类型"
+	}
+
 	// 解析华为云配置
 	huaweiConfig := &cloud.HuaweiConfig{
 		Region:          config.Region,
@@ -723,7 +744,11 @@ func (s *FirewallService) getHuaweiClient(cloudConfigID uint) (*cloud.HuaweiClie
 		SecurityGroupID: config.InstanceId, // 在云配置中，实例ID字段用于存储安全组ID
 	}
 
-	return cloud.NewHuaweiClient(huaweiConfig)
+	client, err := cloud.NewHuaweiClient(huaweiConfig)
+	if err != nil {
+		return nil, fmt.Errorf("创建华为云客户端失败 (%s): %v", serverTypeDesc, err)
+	}
+	return client, nil
 }
 
 // updateHuaweiFirewallRule 更新华为云防火墙规则
@@ -820,119 +845,4 @@ func (s *FirewallService) GetHuaweiInstanceInfo(instanceID string, cloudConfigID
 	}
 
 	return client.GetInstance(instanceID)
-}
-
-// UpdateSingleRule 更新单个规则的IP
-func (s *FirewallService) UpdateSingleRule(ruleID uint) error {
-	// 获取规则的独立锁
-	ruleLock := s.getRuleLock(ruleID)
-	ruleLock.Lock()
-	defer ruleLock.Unlock()
-
-	// log.Printf("Starting update for rule %d...", ruleID)
-
-	// 获取规则信息
-	rule, err := s.repo.GetByID(ruleID)
-	if err != nil {
-		log.Printf("Error getting rule %d: %v", ruleID, err)
-		return err
-	}
-
-	if !rule.Enabled {
-		log.Printf("Rule %d is disabled, skipping update", ruleID)
-		return nil
-	}
-
-	// 获取并验证当前公网IP
-	currentIP, err := utils.GetValidatedPublicIP(s.configService)
-	if err != nil {
-		log.Printf("Error getting/validating public IP for rule %d: %v", ruleID, err)
-		return err
-	}
-
-	// log.Printf("Current public IP for rule %d: %s", ruleID, currentIP)
-
-	// 使用共用的处理逻辑
-	s.processRule(*rule, currentIP)
-
-	// log.Printf("Finished update for rule %d", ruleID)
-	return nil
-}
-
-// SyncCloudRules 同步云端规则，清理本地数据库中已经不存在于云端的规则
-func (s *FirewallService) SyncCloudRules() error {
-	// 获取所有本地规则
-	rules, err := s.repo.GetAll()
-	if err != nil {
-		return fmt.Errorf("failed to get local rules: %v", err)
-	}
-
-	var deletedCount int
-	for _, rule := range rules {
-		var shouldDelete bool
-		switch rule.Provider {
-		case "TencentCloud":
-			shouldDelete, err = s.syncTencentRule(&rule)
-		case "Aliyun":
-			shouldDelete, err = s.syncAliyunRule(&rule)
-		default:
-			continue
-		}
-
-		if err != nil {
-			log.Printf("Failed to sync rule %d: %v", rule.ID, err)
-			continue
-		}
-
-		if shouldDelete {
-			deletedCount++
-		}
-	}
-
-	if deletedCount > 0 {
-		log.Printf("Sync completed: deleted %d rules that no longer exist in cloud", deletedCount)
-	} else {
-		log.Printf("Sync completed: all local rules exist in cloud")
-	}
-
-	return nil
-}
-
-// syncAliyunRule 同步单个阿里云规则，返回是否应该删除该规则
-func (s *FirewallService) syncAliyunRule(rule *model.FirewallRule) (bool, error) {
-	client, err := s.getAliyunClient(rule.CloudConfigID)
-	if err != nil {
-		return false, fmt.Errorf("failed to get Aliyun client: %v", err)
-	}
-
-	// 获取云端规则列表
-	cloudRules, err := client.ListFirewallRules(rule.InstanceID)
-	if err != nil {
-		return false, fmt.Errorf("failed to list cloud rules: %v", err)
-	}
-
-	found := false
-	for _, cloudRule := range cloudRules {
-		if cloudRule.Description == rule.Remark {
-			found = true
-			break
-		}
-	}
-
-	// 如果云端不存在该规则，从本地数据库删除
-	if !found {
-		log.Printf("Rule (ID: %d, Remark: %s) not found in cloud, deleting from local database", rule.ID, rule.Remark)
-		if err := s.repo.Delete(rule.ID); err != nil {
-			return false, fmt.Errorf("failed to delete rule from database: %v", err)
-		}
-		return true, nil
-	}
-
-	return false, nil
-}
-
-// syncTencentRule 同步单个腾讯云规则，返回是否应该删除该规则
-func (s *FirewallService) syncTencentRule(rule *model.FirewallRule) (bool, error) {
-	// TODO: 实现腾讯云规则同步逻辑
-	return false, nil
 }

@@ -170,11 +170,23 @@ func (s *configService) TestCloudConfig(id uint) (*CloudTestResult, error) {
 }
 
 func (s *configService) testTencentInstance(config *model.CloudProviderConfig) (*CloudTestResult, error) {
+	// 根据Type字段确定服务器类型
+	var serverType string
+	switch config.Type {
+	case 0:
+		serverType = "CVM"
+	case 1:
+		serverType = "轻量应用服务器"
+	default:
+		serverType = "其他"
+	}
+
 	// 创建腾讯云客户端配置
 	tencentConfig := cloud.TencentConfig{
 		SecretId:   config.SecretId,
 		SecretKey:  config.SecretKey,
 		Region:     config.Region,
+		Type:       config.Type,
 		InstanceId: config.InstanceId,
 	}
 
@@ -191,7 +203,7 @@ func (s *configService) testTencentInstance(config *model.CloudProviderConfig) (
 	if config.InstanceId == "" {
 		return &CloudTestResult{
 			Success:        true,
-			Message:        "腾讯云凭证验证成功，但未配置实例ID",
+			Message:        fmt.Sprintf("腾讯云凭证验证成功，服务器类型: %s，但未配置实例ID", serverType),
 			InstanceExists: false,
 		}, nil
 	}
@@ -207,7 +219,7 @@ func (s *configService) testTencentInstance(config *model.CloudProviderConfig) (
 	}
 
 	// 成功获取实例信息
-	message := fmt.Sprintf("实例检查成功，实例名称: %s，状态: %s", instanceInfo.InstanceName, instanceInfo.Status)
+	message := fmt.Sprintf("实例验证成功，服务器类型: %s，实例名称: %s，状态: %s", serverType, instanceInfo.InstanceName, instanceInfo.Status)
 	return &CloudTestResult{
 		Success: true,
 		Message: message,
@@ -219,6 +231,7 @@ func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*
 	aliyunConfig := cloud.AliyunConfig{
 		AccessKeyID:      config.SecretId,
 		AccessKeySecret:  config.SecretKey,
+		Type:             config.Type,
 		RegionID:         config.Region,
 		SecurityGroupIds: config.InstanceId, // 这里存的是安全组ID
 	}
@@ -240,19 +253,44 @@ func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*
 		}, nil
 	}
 
-	// 验证安全组是否存在
-	sgInfo, err := client.ValidateSecurityGroup(config.InstanceId)
-	if err != nil {
-		return &CloudTestResult{
-			Success:        false,
-			Message:        fmt.Sprintf("安全组验证失败: %v", err),
-			InstanceExists: false,
-		}, err
+	var serverType string
+	var message string
+	var success bool
+	switch config.Type {
+	case 0:
+		serverType = "ECS"
+		// 验证安全组是否存在
+		sgInfo, err := client.ValidateSecurityGroup(config.InstanceId)
+		if err != nil {
+			return &CloudTestResult{
+				Success:        false,
+				Message:        fmt.Sprintf("安全组验证失败: %v", err),
+				InstanceExists: false,
+			}, err
+		}
+		message = fmt.Sprintf("安全组验证成功，服务器类型: %s，名称: %s，描述: %s，规则数量: %d", serverType, sgInfo.Name, sgInfo.Description, sgInfo.RulesCount)
+		success = true
+	case 1:
+		serverType = "轻量应用服务器"
+		// 验证实例是否存在
+		instanceInfo, err := client.GetInstance(config.InstanceId)
+		if err != nil {
+			return &CloudTestResult{
+				Success:        false,
+				Message:        fmt.Sprintf("实例验证失败: %v", err),
+				InstanceExists: false,
+			}, err
+		}
+		message = fmt.Sprintf("实例验证成功，服务器类型: %s，实例名称: %s，状态: %s", serverType, instanceInfo.InstanceName, instanceInfo.Status)
+		success = true
+	default:
+		serverType = "其他"
+		message = fmt.Sprintf("不支持的服务器类型: %d", config.Type)
+		success = false
 	}
 
-	message := fmt.Sprintf("安全组验证成功，名称: %s，描述: %s，规则数量: %d", sgInfo.Name, sgInfo.Description, sgInfo.RulesCount)
 	return &CloudTestResult{
-		Success: true,
+		Success: success,
 		Message: message,
 	}, nil
 }
