@@ -4,9 +4,11 @@ import (
 	apiv1 "FireFlow/internal/api/v1"
 	"FireFlow/internal/core"
 	"FireFlow/internal/logger"
+	"FireFlow/internal/middleware"
 	"FireFlow/internal/model"
 	"FireFlow/internal/repository"
 	"FireFlow/internal/service"
+	"crypto/rand"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -45,6 +47,10 @@ logging:
   max_backups: 7                 # 保留的备份文件数量
   max_age: 30                    # 保留文件的最大天数
   compress: true                 # 是否压缩旧文件
+
+security:
+  jwt_secret: ""                 # JWT密钥，留空将自动生成
+  expire_time: 72                # JWT过期时间(小时)  
 `
 
 // ginLoggerMiddleware 自定义GIN日志中间件
@@ -156,6 +162,83 @@ func initializeCronJobs(configService service.ConfigService, cronManager *core.C
 	return nil
 }
 
+// generateJWTSecret 生成随机JWT密钥
+func generateJWTSecret() (string, error) {
+	bytes := make([]byte, 32) // 256 bits
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	// 转换为十六进制字符串
+	return fmt.Sprintf("%x", bytes), nil
+}
+
+// updateJWTSecretInConfigFile 手动更新配置文件中的JWT密钥，保持格式和注释
+func updateJWTSecretInConfigFile(configFile, newSecret string) error {
+	// 读取原始文件内容
+	content, err := os.ReadFile(configFile)
+	if err != nil {
+		return err
+	}
+
+	// 转换为字符串并替换JWT密钥
+	configStr := string(content)
+	lines := strings.Split(configStr, "\n")
+
+	for i, line := range lines {
+		// 查找 jwt_secret 行
+		if strings.Contains(line, "jwt_secret:") && strings.Contains(line, "\"\"") {
+			// 保持原有的缩进和格式，只替换空字符串为新密钥
+			lines[i] = strings.Replace(line, `""`, `"`+newSecret+`"`, 1)
+			break
+		}
+	}
+
+	// 重新组合内容
+	updatedContent := strings.Join(lines, "\n")
+
+	// 写回文件
+	return os.WriteFile(configFile, []byte(updatedContent), 0644)
+}
+
+// setupJWTSecret 设置JWT密钥
+func setupJWTSecret() error {
+	jwtSecret := viper.GetString("security.jwt_secret")
+
+	if jwtSecret == "" {
+		// 生成新的JWT密钥
+		newSecret, err := generateJWTSecret()
+		if err != nil {
+			return fmt.Errorf("failed to generate JWT secret: %v", err)
+		}
+
+		// 设置到配置中
+		viper.Set("security.jwt_secret", newSecret)
+
+		// 保存到配置文件
+		configFile := viper.ConfigFileUsed()
+		if configFile != "" {
+			if err := updateJWTSecretInConfigFile(configFile, newSecret); err != nil {
+				logger.ErrorLogger.Warnf("Failed to write JWT secret to config file: %v", err)
+			} else {
+				logger.InfoLogger.Info("Generated and saved new JWT secret to config file")
+			}
+		}
+
+		jwtSecret = newSecret
+	}
+
+	// 设置JWT密钥到中间件
+	middleware.SetJWTSecret([]byte(jwtSecret))
+	// 设置JWT过期时间
+	expireTime := viper.GetInt("security.expire_time")
+	if expireTime <= 0 {
+		expireTime = 72 // 默认72小时
+	}
+	middleware.SetTokenExpiration(expireTime)
+
+	return nil
+}
+
 // setupTimezone 设置时区
 func setupTimezone() error {
 	timezone := viper.GetString("server.timezone")
@@ -177,7 +260,111 @@ func setupTimezone() error {
 	return nil
 }
 
+// printHelp 打印帮助信息
+func printHelp() {
+	fmt.Println("FireFlow - 防火墙管理系统")
+	fmt.Println()
+	fmt.Println("用法:")
+	fmt.Println("  ./fireflow          启动服务器")
+	fmt.Println("  ./fireflow reset    重置管理员密码为 'password'")
+	fmt.Println("  ./fireflow help     显示此帮助信息")
+	fmt.Println()
+}
+
+// handleResetCommand 处理重置命令
+func handleResetCommand() {
+	fmt.Println("正在重置管理员账户...")
+
+	// 初始化基本配置
+	if err := logger.Init(); err != nil {
+		fmt.Printf("日志初始化失败: %v\n", err)
+		return
+	}
+
+	// 加载环境变量
+	if err := godotenv.Load(); err != nil {
+		// 忽略错误，使用系统环境变量
+	}
+
+	// 读取配置文件
+	viper.SetConfigName("config")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath("./configs")
+
+	if err := viper.ReadInConfig(); err != nil {
+		fmt.Printf("读取配置文件失败: %v\n", err)
+		return
+	}
+
+	// 设置时区
+	if err := setupTimezone(); err != nil {
+		fmt.Printf("设置时区失败: %v\n", err)
+		return
+	}
+
+	// 连接数据库
+	dbPath := viper.GetString("database.path")
+	if dbPath == "" {
+		dbPath = "./configs/database.db"
+	}
+
+	// 确保数据库目录存在
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		fmt.Printf("创建数据库目录失败: %v\n", err)
+		return
+	}
+
+	dsn := dbPath + "?_timeout=30000&_journal_mode=WAL&_synchronous=NORMAL&_cache_size=1000&_foreign_keys=1&_busy_timeout=30000"
+	db, err := gorm.Open(sqlite.New(sqlite.Config{
+		DriverName: "sqlite",
+		DSN:        dsn,
+	}), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+	if err != nil {
+		fmt.Printf("连接数据库失败: %v\n", err)
+		return
+	}
+
+	// 确保数据表存在
+	if err := db.AutoMigrate(&model.AuthUser{}); err != nil {
+		fmt.Printf("数据库迁移失败: %v\n", err)
+		return
+	}
+
+	// 创建仓库和服务
+	authRepo := repository.NewAuthUserRepository(db)
+	authService := service.NewAuthService(authRepo)
+
+	// 重置管理员密码
+	if err := authService.ResetAdminPassword(); err != nil {
+		fmt.Printf("重置管理员密码失败: %v\n", err)
+		return
+	}
+
+	fmt.Println("✅ 管理员账户重置成功！")
+	fmt.Println("   用户名: admin")
+	fmt.Println("   密码: password")
+}
+
 func main() {
+	// 检查命令行参数
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "reset":
+			handleResetCommand()
+			return
+		case "help", "-h", "--help":
+			printHelp()
+			return
+		default:
+			fmt.Printf("Unknown command: %s\n", os.Args[1])
+			printHelp()
+			return
+		}
+	}
+
 	// 初始化日志系统
 	if err := logger.Init(); err != nil {
 		logrus.Fatalf("Failed to initialize logger: %v", err)
@@ -249,6 +436,11 @@ func main() {
 		logger.ErrorLogger.Fatalf("Failed to setup timezone: %v", err)
 	}
 
+	// 设置JWT密钥
+	if err := setupJWTSecret(); err != nil {
+		logger.ErrorLogger.Fatalf("Failed to setup JWT secret: %v", err)
+	}
+
 	// 确保数据库目录存在
 	dbPath := viper.GetString("database.path")
 	dbDir := filepath.Dir(dbPath)
@@ -295,6 +487,7 @@ func main() {
 		&model.FirewallRule{},
 		&model.ConfigItem{},
 		&model.CloudProviderConfig{},
+		&model.AuthUser{},
 	); err != nil {
 		logger.ErrorLogger.Fatalf("Failed to migrate database: %v", err)
 	}
@@ -302,10 +495,20 @@ func main() {
 	// Initialize repositories
 	firewallRepo := repository.NewFirewallRepo(db)
 	configRepo := repository.NewConfigRepository(db)
+	authRepo := repository.NewAuthUserRepository(db)
 
 	// Initialize services
 	configService := service.NewConfigService(configRepo)
 	firewallService := service.NewFirewallService(firewallRepo, configService)
+	authService := service.NewAuthService(authRepo)
+
+	// 设置JWT令牌版本验证器
+	middleware.SetTokenValidator(authService)
+
+	// Initialize default admin user
+	if err := authService.InitializeDefaultUser(); err != nil {
+		logger.ErrorLogger.Fatalf("Failed to initialize default user: %v", err)
+	}
 
 	// 初始化定时任务管理器
 	cronManager := core.NewCronManager()
@@ -404,7 +607,7 @@ func main() {
 
 	// Register API v1 routes
 	apiV1Group := r.Group("/api/v1")
-	apiv1.RegisterRoutes(apiV1Group, firewallService, configService, cronManager)
+	apiv1.RegisterRoutes(apiV1Group, firewallService, configService, cronManager, authService)
 
 	port := viper.GetString("server.port")
 	logger.InfoLogger.Infof("Server starting on port %s", port)
