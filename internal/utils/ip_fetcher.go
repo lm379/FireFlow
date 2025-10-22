@@ -102,6 +102,6 @@ func GetValidatedPublicIP(configService interface{}) (string, error) {
 		return "", fmt.Errorf("IP validation failed: %v", err)
 	}
 
-	// log.Printf("Successfully got and validated public IP: %s", currentIP)
+	// logger.Printf("Successfully got and validated public IP: %s", currentIP)
 	return currentIP, nil
 }

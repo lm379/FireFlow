@@ -2,7 +2,6 @@ package cloud
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
@@ -84,7 +83,7 @@ func NewTencentClient(config TencentConfig) (*TencentClient, error) {
 		config.Region = "ap-beijing" // 默认北京区域
 	}
 
-	// log.Printf("Initializing Tencent Cloud client with SecretId: %s, Region: %s, Type: %d",
+	// logger.Printf("Initializing Tencent Cloud client with SecretId: %s, Region: %s, Type: %d",
 	// 	maskSecretId(config.SecretId), config.Region, config.Type)
 
 	// 创建认证信息
@@ -196,13 +195,13 @@ func (tc *TencentClient) checkLighthouseFirewallRuleExists(instanceID string, ru
 			existing.Port == rule.Port &&
 			existing.Description == rule.Description {
 			existingRule = existing
-			// log.Printf("Found existing rule: Protocol=%s, Port=%s, CidrBlock=%s, Description=%s", existing.Protocol, existing.Port, existing.CidrBlock, existing.Description)
+			// logger.Printf("Found existing rule: Protocol=%s, Port=%s, CidrBlock=%s, Description=%s", existing.Protocol, existing.Port, existing.CidrBlock, existing.Description)
 			break
 		}
 	}
 
 	if existingRule != nil {
-		// log.Printf("Found existing rule: %+v", existingRule)
+		// logger.Printf("Found existing rule: %+v", existingRule)
 		return existingRule, nil
 	}
 
@@ -221,19 +220,19 @@ func (tc *TencentClient) createLighthouseFirewallRule(instanceID string, rule *F
 	if existingRule != nil {
 		// 如果IP相同，直接返回现有规则
 		if existingRule.CidrBlock == rule.CidrBlock {
-			log.Printf("Rule already exists with same IP (Protocol=%s, Port=%s, CidrBlock=%s), skipping creation",
-				existingRule.Protocol, existingRule.Port, existingRule.CidrBlock)
+			// logger.Printf("Rule already exists with same IP (Protocol=%s, Port=%s, CidrBlock=%s), skipping creation",
+			// 	existingRule.Protocol, existingRule.Port, existingRule.CidrBlock)
 			return existingRule, nil
 		}
 
 		// 如果IP不同，先删除旧规则
-		log.Printf("Rule exists with different IP (current: %s, new: %s), deleting old rule first",
-			existingRule.CidrBlock, rule.CidrBlock)
+		// logger.Printf("Rule exists with different IP (current: %s, new: %s), deleting old rule first",
+		// existingRule.CidrBlock, rule.CidrBlock)
 		err = tc.deleteLighthouseFirewallRuleBySpec(instanceID, existingRule)
 		if err != nil {
 			return nil, fmt.Errorf("failed to delete existing rule before creating new one: %v", err)
 		}
-		// log.Printf("Successfully deleted existing rule with old IP")
+		// logger.Printf("Successfully deleted existing rule with old IP")
 	}
 
 	// 创建新规则
@@ -270,7 +269,7 @@ func (tc *TencentClient) createLighthouseFirewallRule(instanceID string, rule *F
 		InstanceID:  instanceID,
 	}
 
-	log.Printf("Successfully created Lighthouse firewall rule: %+v", result)
+	// logger.Printf("Successfully created Lighthouse firewall rule: %+v", result)
 	return result, nil
 }
 
@@ -299,8 +298,8 @@ func (tc *TencentClient) deleteLighthouseFirewallRuleBySpec(instanceID string, r
 		return fmt.Errorf("failed to delete Lighthouse firewall rule: %v", err)
 	}
 
-	log.Printf("Deleted Lighthouse firewall rule (proto:%s, port:%s, cidr:%s) for instance %s",
-		rule.Protocol, rule.Port, rule.CidrBlock, instanceID)
+	// logger.Printf("Deleted Lighthouse firewall rule (proto:%s, port:%s, cidr:%s) for instance %s",
+	// 	rule.Protocol, rule.Port, rule.CidrBlock, instanceID)
 	return nil
 }
 

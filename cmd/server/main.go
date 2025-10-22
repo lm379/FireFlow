@@ -3,14 +3,13 @@ package main
 import (
 	apiv1 "FireFlow/internal/api/v1"
 	"FireFlow/internal/core"
+	"FireFlow/internal/logger"
 	"FireFlow/internal/model"
 	"FireFlow/internal/repository"
 	"FireFlow/internal/service"
 	"embed"
 	"fmt"
-	"io"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -28,91 +28,24 @@ import (
 //go:embed all:web
 var webFS embed.FS
 
-// 全局logger
-var (
-	InfoLogger  *log.Logger
-	ErrorLogger *log.Logger
-	GinLogger   *log.Logger
-)
-
 // 默认配置内容
 const defaultConfigContent = `
 server:
   port: ":9686"
+  timezone: "Asia/Shanghai"      # 服务器时区设置
 
 database:
   path: "./configs/database.db"  # SQLite数据库文件
+
+logging:
+  level: "info"                  # 日志级别: debug, info, warn, error
+  enable_gin_logger: true        # 是否启用Gin HTTP请求日志
+  enable_file_output: true       # 是否输出日志到文件
+  max_file_size: 100             # 日志文件最大大小(MB)
+  max_backups: 7                 # 保留的备份文件数量
+  max_age: 30                    # 保留文件的最大天数
+  compress: true                 # 是否压缩旧文件
 `
-
-// initLogger 初始化日志系统
-func initLogger() error {
-	// 创建日志目录
-	logDir := "./configs/logs"
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("failed to create log directory: %v", err)
-	}
-
-	// 生成日志文件名（按日期）
-	currentTime := time.Now()
-	dateStr := currentTime.Format("2006-01-02")
-
-	infoLogFile := filepath.Join(logDir, fmt.Sprintf("app-%s.log", dateStr))
-	errorLogFile := filepath.Join(logDir, fmt.Sprintf("error-%s.log", dateStr))
-	ginLogFile := filepath.Join(logDir, fmt.Sprintf("gin-%s.log", dateStr))
-
-	// 创建或打开info日志文件
-	infoFile, err := os.OpenFile(infoLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return fmt.Errorf("failed to open info log file: %v", err)
-	}
-
-	// 创建或打开error日志文件
-	errorFile, err := os.OpenFile(errorLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return fmt.Errorf("failed to open error log file: %v", err)
-	}
-
-	// 创建或打开gin日志文件
-	ginFile, err := os.OpenFile(ginLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return fmt.Errorf("failed to open gin log file: %v", err)
-	}
-
-	// 设置info logger：同时输出到控制台和文件
-	InfoLogger = log.New(io.MultiWriter(os.Stdout, infoFile), "[INFO] ", log.LstdFlags|log.Lshortfile)
-
-	// 设置error logger：同时输出到控制台和文件
-	ErrorLogger = log.New(io.MultiWriter(os.Stderr, errorFile), "[ERROR] ", log.LstdFlags|log.Lshortfile)
-
-	// 设置gin logger：同时输出到控制台和文件
-	GinLogger = log.New(io.MultiWriter(os.Stdout, ginFile), "[GIN] ", log.LstdFlags)
-
-	// 替换默认的logger
-	log.SetOutput(io.MultiWriter(os.Stdout, infoFile))
-	log.SetPrefix("[INFO] ")
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
-	InfoLogger.Printf("Logger initialized, logs will be saved to %s", logDir)
-	return nil
-}
-
-// getGinLogWriter 获取GIN日志写入器
-func getGinLogWriter() io.Writer {
-	if GinLogger == nil {
-		return os.Stdout
-	}
-	// 从GinLogger中提取文件写入器
-	logDir := "./configs/logs"
-	currentTime := time.Now()
-	dateStr := currentTime.Format("2006-01-02")
-	ginLogFile := filepath.Join(logDir, fmt.Sprintf("gin-%s.log", dateStr))
-
-	ginFile, err := os.OpenFile(ginLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return os.Stdout
-	}
-	return ginFile
-}
 
 // ginLoggerMiddleware 自定义GIN日志中间件
 func ginLoggerMiddleware() gin.HandlerFunc {
@@ -137,8 +70,8 @@ func ginLoggerMiddleware() gin.HandlerFunc {
 
 		// 根据状态码决定日志级别
 		if statusCode >= 400 {
-			if GinLogger != nil {
-				GinLogger.Printf("[ERROR] %3d | %13v | %15s | %-7s %s",
+			if logger.GinLogger != nil {
+				logger.GinLogger.Errorf("%3d | %13v | %15s | %-7s %s",
 					statusCode,
 					latency,
 					clientIP,
@@ -147,8 +80,8 @@ func ginLoggerMiddleware() gin.HandlerFunc {
 				)
 			}
 		} else {
-			if GinLogger != nil {
-				GinLogger.Printf("%3d | %13v | %15s | %-7s %s",
+			if logger.GinLogger != nil {
+				logger.GinLogger.Infof("%3d | %13v | %15s | %-7s %s",
 					statusCode,
 					latency,
 					clientIP,
@@ -177,7 +110,7 @@ func initializeCronJobs(configService service.ConfigService, cronManager *core.C
 	// 获取定时任务相关配置
 	cronEnabledStr, err := configService.GetConfig("cron_enabled")
 	if err != nil || cronEnabledStr == "" {
-		InfoLogger.Printf("Cron configuration not found, using default settings")
+		logger.InfoLogger.Info("Cron configuration not found, using default settings")
 		// 设置默认配置
 		configService.SetConfig("cron_enabled", "true", "string", "system", "定时任务启用状态")
 		configService.SetConfig("ip_check_interval", "30", "string", "system", "IP检查间隔(分钟)")
@@ -200,13 +133,13 @@ func initializeCronJobs(configService service.ConfigService, cronManager *core.C
 		// 检查是否应该立即执行一次
 		shouldRunNow, err := firewallService.CheckIfShouldRunNow(intervalMinutes)
 		if err != nil {
-			ErrorLogger.Printf("Warning: Failed to check if should run now: %v", err)
+			logger.ErrorLogger.Warnf("Warning: Failed to check if should run now: %v", err)
 		} else if shouldRunNow {
 			// 立即执行一次
-			InfoLogger.Println("Running firewall update immediately due to elapsed time")
+			logger.InfoLogger.Info("Running firewall update immediately due to elapsed time")
 			err := cronManager.ExecuteNow()
 			if err != nil {
-				ErrorLogger.Printf("Warning: Failed to execute immediate update: %v", err)
+				logger.ErrorLogger.Warnf("Warning: Failed to execute immediate update: %v", err)
 			}
 		}
 
@@ -215,25 +148,44 @@ func initializeCronJobs(configService service.ConfigService, cronManager *core.C
 		if err != nil {
 			return fmt.Errorf("failed to start firewall update job: %v", err)
 		}
-		InfoLogger.Printf("Firewall update job started with %d minute interval", intervalMinutes)
+		// logger.InfoLogger.Infof("Firewall update job started with %d minute interval", intervalMinutes)
 	} else {
-		InfoLogger.Println("Firewall update job is disabled or invalid interval")
+		logger.InfoLogger.Info("Firewall update job is disabled or invalid interval")
 	}
 
 	return nil
 }
 
-func main() {
-	// 初始化日志系统
-	if err := initLogger(); err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+// setupTimezone 设置时区
+func setupTimezone() error {
+	timezone := viper.GetString("server.timezone")
+	if timezone == "" {
+		timezone = "Asia/Shanghai" // 默认时区
 	}
 
-	// 加载 .env 文件（如果存在）
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		logger.InfoLogger.Warnf("Failed to load timezone %s, using Asia/Shanghai: %v", timezone, err)
+		location, err = time.LoadLocation("Asia/Shanghai")
+		if err != nil {
+			logger.InfoLogger.Warnf("Failed to load Asia/Shanghai timezone, using UTC: %v", err)
+			location = time.UTC
+		}
+	}
+
+	time.Local = location
+	return nil
+}
+
+func main() {
+	// 初始化日志系统
+	if err := logger.Init(); err != nil {
+		logrus.Fatalf("Failed to initialize logger: %v", err)
+	}
 	if err := godotenv.Load(); err != nil {
-		// InfoLogger.Printf("No .env file found, using system environment variables")
+		// logger.InfoLogger.Info("No .env file found, using system environment variables")
 	} else {
-		InfoLogger.Printf("Loaded environment variables from .env file")
+		logger.InfoLogger.Info("Loaded environment variables from .env file")
 	}
 
 	// 从环境变量获取运行模式
@@ -260,29 +212,48 @@ func main() {
 		// 如果是找不到配置文件的错误，创建默认配置
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			configPath := "./configs/config.yaml"
-			InfoLogger.Printf("Config file not found, creating default config at %s", configPath)
+			logger.InfoLogger.Infof("Config file not found, creating default config at %s", configPath)
 
 			if err := createDefaultConfig(configPath); err != nil {
-				ErrorLogger.Fatalf("Failed to create default config file: %v", err)
+				logger.ErrorLogger.Fatalf("Failed to create default config file: %v", err)
 			}
 
 			// 重新尝试读取配置
 			if err := viper.ReadInConfig(); err != nil {
-				ErrorLogger.Fatalf("Error reading newly created config file: %v", err)
+				logger.ErrorLogger.Fatalf("Error reading newly created config file: %v", err)
 			}
 
-			InfoLogger.Printf("Default config file created successfully at %s", configPath)
+			logger.InfoLogger.Infof("Default config file created successfully at %s", configPath)
 		} else {
 			// 其他读取错误
-			ErrorLogger.Fatalf("Error reading config file: %v", err)
+			logger.ErrorLogger.Fatalf("Error reading config file: %v", err)
 		}
+	}
+
+	// 重新初始化日志系统（基于配置文件）
+	logConfig := logger.Config{
+		Level:            viper.GetString("logging.level"),
+		EnableGinLogger:  viper.GetBool("logging.enable_gin_logger"),
+		EnableFileOutput: viper.GetBool("logging.enable_file_output"),
+		MaxFileSize:      viper.GetInt("logging.max_file_size"),
+		MaxBackups:       viper.GetInt("logging.max_backups"),
+		MaxAge:           viper.GetInt("logging.max_age"),
+		Compress:         viper.GetBool("logging.compress"),
+	}
+	if err := logger.InitWithConfig(logConfig); err != nil {
+		logger.ErrorLogger.Fatalf("Failed to reinitialize logger with config: %v", err)
+	}
+
+	// 设置时区
+	if err := setupTimezone(); err != nil {
+		logger.ErrorLogger.Fatalf("Failed to setup timezone: %v", err)
 	}
 
 	// 确保数据库目录存在
 	dbPath := viper.GetString("database.path")
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
-		ErrorLogger.Fatalf("Failed to create database directory: %v", err)
+		logger.ErrorLogger.Fatalf("Failed to create database directory: %v", err)
 	}
 
 	// 使用纯 Go SQLite 驱动配置，添加防锁配置
@@ -295,13 +266,13 @@ func main() {
 		DisableForeignKeyConstraintWhenMigrating: true,
 	})
 	if err != nil {
-		ErrorLogger.Fatalf("Failed to connect to database: %v", err)
+		logger.ErrorLogger.Fatalf("Failed to connect to database: %v", err)
 	}
 
 	// 配置连接池
 	sqlDB, err := db.DB()
 	if err != nil {
-		ErrorLogger.Fatalf("Failed to get underlying sql.DB: %v", err)
+		logger.ErrorLogger.Fatalf("Failed to get underlying sql.DB: %v", err)
 	}
 
 	// 设置连接池参数以避免锁定
@@ -311,13 +282,13 @@ func main() {
 
 	// 执行WAL模式初始化
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		ErrorLogger.Printf("Warning: Failed to set WAL mode: %v", err)
+		logger.ErrorLogger.Warnf("Warning: Failed to set WAL mode: %v", err)
 	}
 	if _, err := sqlDB.Exec("PRAGMA synchronous=NORMAL;"); err != nil {
-		ErrorLogger.Printf("Warning: Failed to set synchronous mode: %v", err)
+		logger.ErrorLogger.Warnf("Warning: Failed to set synchronous mode: %v", err)
 	}
 	if _, err := sqlDB.Exec("PRAGMA busy_timeout=30000;"); err != nil {
-		ErrorLogger.Printf("Warning: Failed to set busy timeout: %v", err)
+		logger.ErrorLogger.Warnf("Warning: Failed to set busy timeout: %v", err)
 	}
 	// Auto-migrate the schema
 	if err := db.AutoMigrate(
@@ -325,7 +296,7 @@ func main() {
 		&model.ConfigItem{},
 		&model.CloudProviderConfig{},
 	); err != nil {
-		ErrorLogger.Fatalf("Failed to migrate database: %v", err)
+		logger.ErrorLogger.Fatalf("Failed to migrate database: %v", err)
 	}
 
 	// Initialize repositories
@@ -346,17 +317,18 @@ func main() {
 	// 检查并启动定时任务
 	err = initializeCronJobs(configService, cronManager, firewallService)
 	if err != nil {
-		ErrorLogger.Printf("Warning: Failed to initialize cron jobs: %v", err)
+		logger.ErrorLogger.Warnf("Warning: Failed to initialize cron jobs: %v", err)
 	}
 
-	InfoLogger.Printf("Firewall service initialized")
+	// logger.InfoLogger.Info("Firewall service initialized")
 
 	// 创建Gin实例并配置自定义日志
 	gin.DisableConsoleColor() // 禁用控制台颜色以便于文件日志
-	gin.DefaultWriter = io.MultiWriter(os.Stdout, getGinLogWriter())
-	gin.DefaultErrorWriter = io.MultiWriter(os.Stderr, getGinLogWriter())
 
-	r := gin.Default()
+	r := gin.New()
+
+	// 使用默认的恢复中间件
+	r.Use(gin.Recovery())
 
 	// 使用自定义的日志中间件
 	r.Use(ginLoggerMiddleware())
@@ -384,17 +356,17 @@ func main() {
 			c.Next()
 		})
 
-		InfoLogger.Printf("Development mode: CORS enabled for frontend at %s", os.Getenv("FRONTEND_URL"))
+		logger.InfoLogger.Infof("Development mode: CORS enabled for frontend at %s", os.Getenv("FRONTEND_URL"))
 	} else {
 		// 生产模式：提供静态文件服务
 		frontend, err := fs.Sub(webFS, "web")
 		if err != nil {
-			ErrorLogger.Fatal(err)
+			logger.ErrorLogger.Fatal(err)
 		}
 
 		static, err := fs.Sub(frontend, "static")
 		if err != nil {
-			ErrorLogger.Fatal(err)
+			logger.ErrorLogger.Fatal(err)
 		}
 
 		// 处理静态文件
@@ -435,8 +407,8 @@ func main() {
 	apiv1.RegisterRoutes(apiV1Group, firewallService, configService, cronManager)
 
 	port := viper.GetString("server.port")
-	InfoLogger.Printf("Server starting on port %s", port)
+	logger.InfoLogger.Infof("Server starting on port %s", port)
 	if err := r.Run(port); err != nil {
-		ErrorLogger.Fatalf("Failed to start server: %v", err)
+		logger.ErrorLogger.Fatalf("Failed to start server: %v", err)
 	}
 }

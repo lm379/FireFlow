@@ -11,9 +11,11 @@ require (
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.171
 	github.com/joho/godotenv v1.5.1
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.21.0
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.1.32
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lighthouse v1.1.32
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.0
 	modernc.org/sqlite v1.33.1

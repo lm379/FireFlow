@@ -1,8 +1,8 @@
 package cloud
 
 import (
+	"FireFlow/internal/logger"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -99,19 +99,19 @@ func (hc *HuaweiClient) CreateFirewallRule(instanceID string, rule *FirewallRule
 	if existingRule != nil {
 		// 如果IP相同，直接返回现有规则
 		if existingRule.CidrBlock == rule.CidrBlock {
-			if existingRule.Description != rule.Description {
-				log.Printf("Rule already exists with same IP but different description (Protocol=%s, Port=%s, CidrBlock=%s). Existing description: %s, New description: %s. Consider updating the rule instead.",
-					existingRule.Protocol, existingRule.Port, existingRule.CidrBlock, existingRule.Description, rule.Description)
-			} else {
-				log.Printf("Rule already exists with same IP (Protocol=%s, Port=%s, CidrBlock=%s), skipping creation",
-					existingRule.Protocol, existingRule.Port, existingRule.CidrBlock)
-			}
+			// if existingRule.Description != rule.Description {
+			// 	logger.Printf("Rule already exists with same IP but different description (Protocol=%s, Port=%s, CidrBlock=%s). Existing description: %s, New description: %s. Consider updating the rule instead.",
+			// 		existingRule.Protocol, existingRule.Port, existingRule.CidrBlock, existingRule.Description, rule.Description)
+			// } else {
+			// 	logger.Printf("Rule already exists with same IP (Protocol=%s, Port=%s, CidrBlock=%s), skipping creation",
+			// 		existingRule.Protocol, existingRule.Port, existingRule.CidrBlock)
+			// }
 			return existingRule, nil
 		}
 
 		// 如果IP不同，先删除旧规则
-		log.Printf("Rule exists with different IP (current: %s, new: %s), deleting old rule first",
-			existingRule.CidrBlock, rule.CidrBlock)
+		// logger.Printf("Rule exists with different IP (current: %s, new: %s), deleting old rule first",
+		// existingRule.CidrBlock, rule.CidrBlock)
 		err = hc.DeleteFirewallRuleBySpec(instanceID, existingRule)
 		if err != nil {
 			return nil, fmt.Errorf("failed to delete existing rule before creating new one: %v", err)
@@ -167,7 +167,7 @@ func (hc *HuaweiClient) CreateFirewallRule(instanceID string, rule *FirewallRule
 		InstanceID:  instanceID,
 	}
 
-	log.Printf("Successfully created Huawei Cloud security group rule: %+v", result)
+	// logger.Printf("Successfully created Huawei Cloud security group rule: %+v", result)
 	return result, nil
 }
 
@@ -186,7 +186,7 @@ func (hc *HuaweiClient) DeleteFirewallRuleBySpec(instanceID string, rule *Firewa
 
 	if ruleID == "" {
 		// 规则不存在，可能已被删除
-		log.Printf("Security group rule not found, may have been already deleted: %s", rule.Description)
+		// logger.Printf("Security group rule not found, may have been already deleted: %s", rule.Description)
 		return nil
 	}
 
@@ -200,14 +200,14 @@ func (hc *HuaweiClient) DeleteFirewallRuleBySpec(instanceID string, rule *Firewa
 		return fmt.Errorf("failed to delete security group rule: %v", err)
 	}
 
-	log.Printf("Deleted Huawei Cloud security group rule (proto:%s, port:%s, cidr:%s) for instance %s",
-		rule.Protocol, rule.Port, rule.CidrBlock, instanceID)
+	// logger.Printf("Deleted Huawei Cloud security group rule (proto:%s, port:%s, cidr:%s) for instance %s",
+	// 	rule.Protocol, rule.Port, rule.CidrBlock, instanceID)
 	return nil
 }
 
 func (hc *HuaweiClient) UpdateFirewallRule(instanceID string, ruleSpec *FirewallRuleSpec, newIP string) (*FirewallRuleResult, error) {
-	log.Printf("Updating Huawei Cloud firewall rule for instance %s with new IP %s", instanceID, newIP)
-	log.Printf("Rule spec: Protocol=%s, Port=%s, Description=%s", ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
+	// logger.Printf("Updating Huawei Cloud firewall rule for instance %s with new IP %s", instanceID, newIP)
+	// logger.Printf("Rule spec: Protocol=%s, Port=%s, Description=%s", ruleSpec.Protocol, ruleSpec.Port, ruleSpec.Description)
 
 	// 先查询现有规则，通过描述匹配规则
 	existingRules, err := hc.ListFirewallRules(instanceID)
@@ -224,19 +224,19 @@ func (hc *HuaweiClient) UpdateFirewallRule(instanceID string, ruleSpec *Firewall
 	var targetRule *FirewallRuleResult
 	for _, rule := range existingRules {
 		if rule.Protocol == ruleSpec.Protocol && rule.Port == *port {
-			if ruleSpec.Port == "ALL" && rule.Description != ruleSpec.Description {
-				log.Printf("Found rule with matching protocol and port but different description (Protocol=%s, Port=%s). Existing description: %s, Target description: %s. Proceeding with update.",
-					rule.Protocol, rule.Port, rule.Description, ruleSpec.Description)
-			}
+			// if ruleSpec.Port == "ALL" && rule.Description != ruleSpec.Description {
+			// 	logger.Printf("Found rule with matching protocol and port but different description (Protocol=%s, Port=%s). Existing description: %s, Target description: %s. Proceeding with update.",
+			// 		rule.Protocol, rule.Port, rule.Description, ruleSpec.Description)
+			// }
 			targetRule = rule
-			// log.Printf("Found target rule: Description=%s, CidrBlock=%s", rule.Description, rule.CidrBlock)
+			// logger.Printf("Found target rule: Description=%s, CidrBlock=%s", rule.Description, rule.CidrBlock)
 			break
 		}
 	}
 
 	if targetRule == nil {
 		// 规则不存在，可能已被手动删除，直接创建新规则
-		log.Printf("Rule with description '%s' not found in cloud, creating new rule", ruleSpec.Description)
+		// logger.Printf("Rule with description '%s' not found in cloud, creating new rule", ruleSpec.Description)
 		newRule := *ruleSpec
 		newRule.CidrBlock = fmt.Sprintf("%s/32", newIP)
 		return hc.CreateFirewallRule(instanceID, &newRule)
@@ -245,16 +245,16 @@ func (hc *HuaweiClient) UpdateFirewallRule(instanceID string, ruleSpec *Firewall
 	// 检查IP是否已经一致
 	newCidrBlock := fmt.Sprintf("%s/32", newIP)
 	if targetRule.CidrBlock == newCidrBlock {
-		log.Printf("Rule with description '%s' already has the correct IP %s, skipping update", ruleSpec.Description, newIP)
+		// logger.Printf("Rule with description '%s' already has the correct IP %s, skipping update", ruleSpec.Description, newIP)
 		return targetRule, nil
 	}
 
-	log.Printf("IP mismatch detected: current=%s, target=%s, proceeding with update", targetRule.CidrBlock, newCidrBlock)
+	// logger.Printf("IP mismatch detected: current=%s, target=%s, proceeding with update", targetRule.CidrBlock, newCidrBlock)
 
 	err = hc.DeleteFirewallRuleBySpec(instanceID, targetRule)
 	if err != nil {
 		// 即使删除失败，也记录日志并继续创建新规则
-		log.Printf("Warning: failed to delete old rule with description '%s': %v", ruleSpec.Description, err)
+		logger.Warnf("Warning: failed to delete old rule with description '%s': %v", ruleSpec.Description, err)
 	}
 
 	// 更新CIDR块为新IP

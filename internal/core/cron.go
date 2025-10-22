@@ -1,8 +1,8 @@
 package core
 
 import (
+	"FireFlow/internal/logger"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/robfig/cron/v3"
@@ -72,7 +72,7 @@ func (cm *CronManager) StopFirewallUpdateJob() {
 		cm.firewallJobID = 0
 		cm.isRunning = false
 		cm.intervalMinutes = 0 // 重置间隔时间
-		log.Println("Firewall update job stopped")
+		logger.Println("Firewall update job stopped")
 	}
 }
 
@@ -87,9 +87,9 @@ func (cm *CronManager) ExecuteNow() error {
 	cm.mutex.RUnlock()
 
 	if interval > 0 {
-		log.Printf("Executing firewall update job immediately... (scheduled interval: %d minutes)", interval)
+		logger.Printf("Executing firewall update job immediately... (scheduled interval: %d minutes)", interval)
 	} else {
-		log.Println("Executing firewall update job immediately...")
+		logger.Println("Executing firewall update job immediately...")
 	}
 
 	go cm.updateFunc() // 异步执行，避免阻塞
@@ -106,12 +106,12 @@ func (cm *CronManager) IsRunning() bool {
 // Start 启动定时任务引擎
 func (cm *CronManager) Start() {
 	cm.cron.Start()
-	// log.Println("Cron manager started")
+	// logger.Println("Cron manager started")
 }
 
 // Stop 停止定时任务引擎
 func (cm *CronManager) Stop() {
 	cm.StopFirewallUpdateJob()
 	cm.cron.Stop()
-	log.Println("Cron manager stopped")
+	logger.Println("Cron manager stopped")
 }

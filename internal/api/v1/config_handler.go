@@ -2,10 +2,10 @@ package v1
 
 import (
 	"FireFlow/internal/core"
+	"FireFlow/internal/logger"
 	"FireFlow/internal/service"
 	"FireFlow/internal/utils"
 	"fmt"
-	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -309,7 +309,7 @@ func (h *ConfigHandler) SyncIPNow(c *gin.Context) {
 	// 获取所有启用的规则数量作为更新计数
 	updatedRules, err := h.getEnabledRulesCount()
 	if err != nil {
-		log.Printf("获取启用规则数量失败: %v", err)
+		logger.Errorf("获取启用规则数量失败: %v", err)
 		updatedRules = 0 // 如果获取失败，返回0
 	}
 

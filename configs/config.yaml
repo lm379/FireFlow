@@ -1,5 +1,15 @@
 server:
   port: ":9686"
+  timezone: "Asia/Shanghai"      # 服务器时区设置
 
 database:
   path: "./configs/database.db"  # SQLite数据库文件
+
+logging:
+  level: "info"                  # 日志级别: debug, info, warn, error
+  enable_gin_logger: true        # 是否启用Gin HTTP请求日志
+  enable_file_output: true       # 是否输出日志到文件
+  max_file_size: 100             # 日志文件最大大小(MB)
+  max_backups: 7                 # 保留的备份文件数量
+  max_age: 30                    # 保留文件的最大天数
+  compress: true                 # 是否压缩旧文件

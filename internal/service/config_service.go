@@ -1,6 +1,7 @@
 package service
 
 import (
+	"FireFlow/internal/logger"
 	"FireFlow/internal/model"
 	"FireFlow/internal/repository"
 	"FireFlow/pkg/cloud"
@@ -125,9 +126,11 @@ func (s *configService) DeleteCloudConfig(id uint) error {
 	// 检查是否存在关联的防火墙规则
 	hasRules, err := s.configRepo.HasAssociatedRules(id)
 	if err != nil {
+		logger.Error("检查关联规则失败: ", err)
 		return fmt.Errorf("检查关联规则失败: %v", err)
 	}
 	if hasRules {
+		logger.Error("无法删除云服务配置，存在关联的防火墙规则。请先删除相关规则再进行操作")
 		return fmt.Errorf("无法删除云服务配置，存在关联的防火墙规则。请先删除相关规则再进行操作")
 	}
 	return s.configRepo.DeleteCloudProviderConfig(id)
@@ -162,6 +165,7 @@ func (s *configService) TestCloudConfig(id uint) (*CloudTestResult, error) {
 	case "HuaweiCloud":
 		return s.testHuaweiInstance(&config)
 	default:
+		logger.Error("不支持的云服务商: ", config.Provider)
 		return &CloudTestResult{
 			Success: false,
 			Message: fmt.Sprintf("不支持的云服务商: %s", config.Provider),
@@ -193,6 +197,7 @@ func (s *configService) testTencentInstance(config *model.CloudProviderConfig) (
 	// 创建腾讯云客户端
 	client, err := cloud.NewTencentClient(tencentConfig)
 	if err != nil {
+		logger.Error("创建腾讯云客户端失败: ", err)
 		return &CloudTestResult{
 			Success: false,
 			Message: fmt.Sprintf("创建腾讯云客户端失败: %v", err),
@@ -201,6 +206,7 @@ func (s *configService) testTencentInstance(config *model.CloudProviderConfig) (
 
 	// 如果没有实例ID，只测试凭证连接
 	if config.InstanceId == "" {
+		logger.Warnf("腾讯云凭证验证成功，服务器类型: %s，但未配置实例ID", serverType)
 		return &CloudTestResult{
 			Success:        true,
 			Message:        fmt.Sprintf("腾讯云凭证验证成功，服务器类型: %s，但未配置实例ID", serverType),
@@ -211,6 +217,7 @@ func (s *configService) testTencentInstance(config *model.CloudProviderConfig) (
 	// 获取实例信息
 	instanceInfo, err := client.GetInstance(config.InstanceId)
 	if err != nil {
+		logger.Error("获取实例信息失败: ", err)
 		return &CloudTestResult{
 			Success:        false,
 			Message:        fmt.Sprintf("获取实例信息失败: %v", err),
@@ -238,6 +245,7 @@ func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*
 
 	client, err := cloud.NewAliyunClient(aliyunConfig)
 	if err != nil {
+		logger.Error("创建阿里云客户端失败: ", err)
 		return &CloudTestResult{
 			Success:        false,
 			Message:        fmt.Sprintf("创建阿里云客户端失败: %v", err),
@@ -246,6 +254,7 @@ func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*
 	}
 
 	if config.InstanceId == "" {
+		logger.Warnf("阿里云凭证验证成功，但未配置安全组ID")
 		return &CloudTestResult{
 			Success:        true,
 			Message:        "阿里云凭证验证成功，但未配置安全组ID",
@@ -262,6 +271,7 @@ func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*
 		// 验证安全组是否存在
 		sgInfo, err := client.ValidateSecurityGroup(config.InstanceId)
 		if err != nil {
+			logger.Error("安全组验证失败: ", err)
 			return &CloudTestResult{
 				Success:        false,
 				Message:        fmt.Sprintf("安全组验证失败: %v", err),
@@ -275,6 +285,7 @@ func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*
 		// 验证实例是否存在
 		instanceInfo, err := client.GetInstance(config.InstanceId)
 		if err != nil {
+			logger.Error("实例验证失败: ", err)
 			return &CloudTestResult{
 				Success:        false,
 				Message:        fmt.Sprintf("实例验证失败: %v", err),
@@ -287,6 +298,7 @@ func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*
 		serverType = "其他"
 		message = fmt.Sprintf("不支持的服务器类型: %d", config.Type)
 		success = false
+		logger.Errorf("不支持的服务器类型: %d", config.Type)
 	}
 
 	return &CloudTestResult{
@@ -298,6 +310,7 @@ func (s *configService) testAliyunInstance(config *model.CloudProviderConfig) (*
 func (s *configService) testHuaweiInstance(config *model.CloudProviderConfig) (*CloudTestResult, error) {
 	// 华为云必须配置ProjectID
 	if config.ProjectID == "" {
+		logger.Error("华为云配置错误：ProjectID 为空，请配置项目ID")
 		return &CloudTestResult{
 			Success: false,
 			Message: "华为云配置错误：ProjectID 为空，请配置项目ID",
@@ -316,6 +329,7 @@ func (s *configService) testHuaweiInstance(config *model.CloudProviderConfig) (*
 	// 创建华为云客户端
 	client, err := cloud.NewHuaweiClient(huaweiConfig)
 	if err != nil {
+		logger.Error("创建华为云客户端失败: ", err)
 		return &CloudTestResult{
 			Success: false,
 			Message: fmt.Sprintf("创建华为云客户端失败: %v", err),
@@ -324,6 +338,7 @@ func (s *configService) testHuaweiInstance(config *model.CloudProviderConfig) (*
 
 	// 如果没有配置安全组ID，只测试凭证
 	if config.InstanceId == "" {
+		logger.Warnf("华为云凭证验证成功，项目ID: %s，但未配置安全组ID", config.ProjectID)
 		return &CloudTestResult{
 			Success:        true,
 			Message:        fmt.Sprintf("华为云凭证验证成功，项目ID: %s，但未配置安全组ID", config.ProjectID),
@@ -334,6 +349,7 @@ func (s *configService) testHuaweiInstance(config *model.CloudProviderConfig) (*
 	// 通过获取防火墙规则列表来验证安全组是否存在
 	rules, err := client.ListFirewallRules(config.InstanceId)
 	if err != nil {
+		logger.Error("安全组验证失败: ", err)
 		return &CloudTestResult{
 			Success:        false,
 			Message:        fmt.Sprintf("安全组验证失败: %v", err),
@@ -355,7 +371,8 @@ func (s *configService) testHuaweiInstance(config *model.CloudProviderConfig) (*
 func (s *configService) MigrateCloudConfigFromYAML(yamlConfig map[string]interface{}) error {
 	cloudConfig, ok := yamlConfig["cloud"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("cloud config not found in yaml")
+		logger.Error("云配置未找到")
+		return fmt.Errorf("云配置未找到")
 	}
 
 	// 遍历每个云服务商配置
@@ -391,6 +408,7 @@ func (s *configService) MigrateCloudConfigFromYAML(yamlConfig map[string]interfa
 		}
 
 		if err := s.configRepo.SetCloudProviderConfig(config); err != nil {
+			logger.Error("迁移云配置失败: ", err)
 			return fmt.Errorf("failed to migrate cloud config for %s: %v", provider, err)
 		}
 	}

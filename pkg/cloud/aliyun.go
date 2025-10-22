@@ -46,7 +46,7 @@ func NewAliyunClient(config AliyunConfig) (*AliyunClient, error) {
 		config.RegionID = "cn-hangzhou" // 默认杭州区域
 	}
 
-	// log.Printf("Initializing Aliyun ECS client with AccessKeyID: %s, Region: %s", maskAliyunSecretId(config.AccessKeyID), config.RegionID)
+	// logger.Printf("Initializing Aliyun ECS client with AccessKeyID: %s, Region: %s", maskAliyunSecretId(config.AccessKeyID), config.RegionID)
 
 	// 创建客户端配置
 	clientConfig := &openapi.Config{
@@ -356,14 +356,14 @@ func (ac *AliyunClient) createSingleRule(instanceID, securityGroupId string, rul
 		}
 
 		// 如果IP不同，删除所有旧规则
-		// log.Printf("Rule exists with different IP, deleting old rules first")
+		// logger.Printf("Rule exists with different IP, deleting old rules first")
 		for _, existingRule := range *existingRules {
 			err = ac.DeleteFirewallRuleBySpec(instanceID, &existingRule)
 			if err != nil {
 				return nil, fmt.Errorf("failed to delete existing rule before creating new one: %v", err)
 			}
 		}
-		// log.Printf("Successfully deleted existing rules with old IP")
+		// logger.Printf("Successfully deleted existing rules with old IP")
 	}
 
 	// 创建新规则
@@ -443,7 +443,7 @@ func (ac *AliyunClient) deleteECSFirewallRule(instanceID string, rule *FirewallR
 			strings.Contains(errStr, "The specified security group rule does not exist") ||
 			strings.Contains(errStr, "rule does not exist") {
 			// 规则已经不存在，认为删除成功
-			// log.Printf("Security group rule already deleted: %s", rule.Description)
+			// logger.Printf("Security group rule already deleted: %s", rule.Description)
 			return nil
 		}
 		return fmt.Errorf("failed to delete ECS firewall rule: %v", err)

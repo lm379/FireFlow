@@ -1,12 +1,12 @@
 package service
 
 import (
+	"FireFlow/internal/logger"
 	"FireFlow/internal/model"
 	"FireFlow/internal/repository"
 	"FireFlow/internal/utils"
 	"FireFlow/pkg/cloud"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -38,9 +38,9 @@ func NewFirewallService(repo repository.FirewallRepository, configService Config
 		var err error
 		tencentClient, err = cloud.NewTencentClient(tencentConfig)
 		if err != nil {
-			log.Printf("Failed to initialize Tencent Cloud client: %v", err)
+			logger.Errorf("Failed to initialize Tencent Cloud client: %v", err)
 		} else {
-			// log.Println("Successfully initialized Tencent Cloud client")
+			// logger.Println("Successfully initialized Tencent Cloud client")
 		}
 	}
 
@@ -57,9 +57,9 @@ func NewFirewallService(repo repository.FirewallRepository, configService Config
 		var err error
 		aliyunClient, err = cloud.NewAliyunClient(aliyunConfig)
 		if err != nil {
-			log.Printf("Failed to initialize Aliyun ECS client: %v", err)
+			logger.Errorf("Failed to initialize Aliyun ECS client: %v", err)
 		} else {
-			// log.Println("Successfully initialized Aliyun ECS client")
+			// logger.Println("Successfully initialized Aliyun ECS client")
 		}
 	}
 
@@ -76,9 +76,9 @@ func NewFirewallService(repo repository.FirewallRepository, configService Config
 		var err error
 		huaweiClient, err = cloud.NewHuaweiClient(huaweiConfig)
 		if err != nil {
-			log.Printf("Failed to initialize Huawei Cloud client: %v", err)
+			logger.Errorf("Failed to initialize Huawei Cloud client: %v", err)
 		} else {
-			// log.Println("Successfully initialized Huawei Cloud client")
+			// logger.Println("Successfully initialized Huawei Cloud client")
 		}
 	}
 
@@ -124,15 +124,15 @@ func (s *FirewallService) UpdateAllRules() {
 	// 获取并验证当前公网IP
 	currentIP, err := utils.GetValidatedPublicIP(s.configService)
 	if err != nil {
-		log.Printf("Error getting/validating public IP: %v", err)
+		logger.Errorf("Error getting/validating public IP: %v", err)
 		return
 	}
-	log.Printf("Current public IP is: %s", currentIP)
+	logger.Printf("Current public IP is: %s", currentIP)
 
 	// 获取所有启用的规则
 	rules, err := s.repo.GetAllEnabled()
 	if err != nil {
-		log.Printf("Error getting firewall rules: %v", err)
+		logger.Errorf("Error getting firewall rules: %v", err)
 		return
 	}
 
@@ -146,30 +146,30 @@ func (s *FirewallService) UpdateAllRules() {
 
 		ruleLock.Unlock()
 	}
-	log.Printf("Firewall update job finished. (interval: %s minutes)", intervalStr)
+	// logger.Printf("Firewall update job finished. (interval: %s minutes)", intervalStr)
 }
 
 // processRule 处理单个规则的更新逻辑
 func (s *FirewallService) processRule(rule model.FirewallRule, currentIP string) {
 	// 只处理有备注的规则
 	if rule.Remark == "" {
-		log.Printf("Skipping rule %d: no remark provided", rule.ID)
+		logger.Warnf("Skipping rule %d: no remark provided", rule.ID)
 		return
 	}
 
 	// 检查规则是否启用
 	if !rule.Enabled {
-		log.Printf("Skipping rule %d: rule is disabled", rule.ID)
+		logger.Warnf("Skipping rule %d: rule is disabled", rule.ID)
 		return
 	}
 
 	// 检查对应的云服务配置是否启用
 	if err := s.checkCloudConfigEnabled(rule.Provider); err != nil {
-		log.Printf("Skipping rule %d: %v", rule.ID, err)
+		logger.Errorf("Skipping rule %d: %v", rule.ID, err)
 		return
 	}
 
-	// log.Printf("Processing rule %d (%s) - Current IP: %s, Last IP: %s", rule.ID, rule.Remark, currentIP, rule.LastIP)
+	// logger.Printf("Processing rule %d (%s) - Current IP: %s, Last IP: %s", rule.ID, rule.Remark, currentIP, rule.LastIP)
 
 	var updateErr error
 	switch rule.Provider {
@@ -184,12 +184,12 @@ func (s *FirewallService) processRule(rule model.FirewallRule, currentIP string)
 	}
 
 	if updateErr != nil {
-		log.Printf("Failed to update rule %d: %v", rule.ID, updateErr)
+		logger.Errorf("Failed to update rule %d: %v", rule.ID, updateErr)
 	} else {
 		if err := s.repo.UpdateIP(rule.ID, currentIP); err != nil {
-			log.Printf("Failed to update IP in database for rule %d: %v", rule.ID, err)
+			logger.Errorf("Failed to update IP in database for rule %d: %v", rule.ID, err)
 		} else {
-			log.Printf("Successfully updated rule %d to IP %s", rule.ID, currentIP)
+			logger.Printf("Successfully updated rule %d to IP %s", rule.ID, currentIP)
 		}
 	}
 }
@@ -204,7 +204,7 @@ func (s *FirewallService) CheckIfShouldRunNow(intervalMinutes int) (bool, error)
 
 	// 如果没有任何更新记录，应该立即执行
 	if oldestTime == nil {
-		log.Println("No previous update records found, should run immediately")
+		logger.Println("No previous update records found, should run immediately")
 		return true, nil
 	}
 
@@ -215,10 +215,10 @@ func (s *FirewallService) CheckIfShouldRunNow(intervalMinutes int) (bool, error)
 	shouldRun := timeSinceUpdate >= intervalDuration
 
 	if shouldRun {
-		log.Printf("Oldest update was %v ago (interval: %v), should run immediately", timeSinceUpdate.Round(time.Minute), intervalDuration)
+		logger.Printf("Oldest update was %v ago (interval: %v), should run immediately", timeSinceUpdate.Round(time.Minute), intervalDuration)
 	}
 	// else {
-	// 	log.Printf("Oldest update was %v ago (interval: %v), will wait for scheduled time",	timeSinceUpdate.Round(time.Minute), intervalDuration)
+	// 	logger.Printf("Oldest update was %v ago (interval: %v), will wait for scheduled time",	timeSinceUpdate.Round(time.Minute), intervalDuration)
 	// }
 
 	return shouldRun, nil
@@ -271,9 +271,9 @@ func (s *FirewallService) createAndUpdateTencentFirewallRule(rule *model.Firewal
 		// 从CIDR块中提取IP（移除/32后缀）
 		resultIP := strings.TrimSuffix(result.CidrBlock, "/32")
 		if resultIP == currentIP {
-			log.Printf("Rule %d (%s): IP未变动 (当前IP: %s)，规则已更新", rule.ID, rule.Remark, currentIP)
+			logger.Printf("Rule %d (%s): IP未变动 (当前IP: %s)，规则已更新", rule.ID, rule.Remark, currentIP)
 		} else {
-			log.Printf("Rule %d (%s): IP已更新 (从 %s 到 %s)", rule.ID, rule.Remark, rule.LastIP, resultIP)
+			logger.Printf("Rule %d (%s): IP已更新 (从 %s 到 %s)", rule.ID, rule.Remark, rule.LastIP, resultIP)
 		}
 
 		// 使用返回的实际IP更新数据库
@@ -286,10 +286,10 @@ func (s *FirewallService) createAndUpdateTencentFirewallRule(rule *model.Firewal
 	// 更新数据库中的规则信息
 	err = s.repo.Update(rule)
 	if err != nil {
-		log.Printf("Warning: Rule created in cloud but failed to update database: %v", err)
+		logger.Warnf("Warning: Rule created in cloud but failed to update database: %v", err)
 	}
 
-	// log.Printf("Successfully created and executed firewall rule for instance %s", rule.InstanceID)
+	// logger.Printf("Successfully created and executed firewall rule for instance %s", rule.InstanceID)
 	return result, nil
 }
 
@@ -315,7 +315,7 @@ func (s *FirewallService) updateTencentFirewallRule(rule *model.FirewallRule, ne
 	if err != nil {
 		// 如果更新失败且错误信息表明规则不存在，尝试重新创建规则
 		if strings.Contains(err.Error(), "not found") {
-			log.Printf("Rule not found in cloud, attempting to recreate it")
+			logger.Errorf("Rule not found in cloud, attempting to recreate it")
 			_, err = s.createAndUpdateTencentFirewallRule(rule, newIP)
 			return err
 		}
@@ -325,7 +325,7 @@ func (s *FirewallService) updateTencentFirewallRule(rule *model.FirewallRule, ne
 	// 更新数据库中的规则信息
 	rule.LastIP = newIP
 	if err := s.repo.Update(rule); err != nil {
-		log.Printf("Warning: Failed to update rule in database: %v", err)
+		logger.Warnf("Warning: Failed to update rule in database: %v", err)
 	}
 
 	return nil
@@ -553,7 +553,7 @@ func (s *FirewallService) updateAliyunFirewallRule(rule *model.FirewallRule, new
 		return fmt.Errorf("创建/更新阿里云防火墙规则失败: %v", err)
 	}
 
-	// log.Printf("Successfully updated Aliyun firewall rule for instance %s, IP: %s", rule.InstanceID, newIP)
+	// logger.Printf("Successfully updated Aliyun firewall rule for instance %s, IP: %s", rule.InstanceID, newIP)
 
 	return nil
 }
@@ -586,9 +586,9 @@ func (s *FirewallService) createAndUpdateAliyunFirewallRule(rule *model.Firewall
 		// 从CIDR块中提取IP（移除/32后缀）
 		resultIP := strings.TrimSuffix(result.CidrBlock, "/32")
 		if resultIP == currentIP {
-			log.Printf("Rule %d (%s): IP unchanged (Current IP: %s), Rule has been updated", rule.ID, rule.Remark, currentIP)
+			logger.Printf("Rule %d (%s): IP unchanged (Current IP: %s), Rule has been updated", rule.ID, rule.Remark, currentIP)
 		} else {
-			log.Printf("Rule %d (%s): IP updated (From %s to %s)", rule.ID, rule.Remark, rule.LastIP, resultIP)
+			logger.Printf("Rule %d (%s): IP updated (From %s to %s)", rule.ID, rule.Remark, rule.LastIP, resultIP)
 		}
 		updateIP = resultIP
 	} else {
@@ -598,10 +598,10 @@ func (s *FirewallService) createAndUpdateAliyunFirewallRule(rule *model.Firewall
 
 	// 更新数据库中的IP
 	if err := s.repo.UpdateIP(rule.ID, updateIP); err != nil {
-		log.Printf("Failed to update IP in database: %v", err)
+		logger.Errorf("Failed to update IP in database: %v", err)
 	}
 
-	// log.Printf("Successfully created Aliyun firewall rule for instance %s, IP: %s", rule.InstanceID, updateIP)
+	// logger.Printf("Successfully created Aliyun firewall rule for instance %s, IP: %s", rule.InstanceID, updateIP)
 
 	return result, nil
 }
@@ -641,7 +641,7 @@ func (s *FirewallService) CreateAliyunFirewallRule(instanceID, port, cidrBlock, 
 		return fmt.Errorf("failed to save rule to database: %v", err)
 	}
 
-	// log.Printf("Successfully created and saved Aliyun firewall rule for instance %s", instanceID)
+	// logger.Printf("Successfully created and saved Aliyun firewall rule for instance %s", instanceID)
 	return nil
 }
 
@@ -774,7 +774,7 @@ func (s *FirewallService) updateHuaweiFirewallRule(rule *model.FirewallRule, new
 		errStr := err.Error()
 		if strings.Contains(errStr, "not found") ||
 			strings.Contains(errStr, "rule does not exist") {
-			log.Printf("Rule ID %d not found in cloud, attempting to recreate", rule.ID)
+			logger.Warnf("Rule ID %d not found in cloud, attempting to recreate", rule.ID)
 
 			// 尝试重新创建规则
 			_, createErr := client.CreateFirewallRule(rule.InstanceID, ruleSpec)
@@ -784,10 +784,10 @@ func (s *FirewallService) updateHuaweiFirewallRule(rule *model.FirewallRule, new
 
 			// 更新数据库中的规则信息
 			if err := s.repo.Update(rule); err != nil {
-				log.Printf("Failed to update rule in database: %v", err)
+				logger.Errorf("Failed to update rule in database: %v", err)
 			}
 
-			log.Printf("Successfully recreated Huawei Cloud firewall rule for instance %s: %s",
+			logger.Printf("Successfully recreated Huawei Cloud firewall rule for instance %s: %s",
 				rule.InstanceID, newIP)
 			return nil
 		}
@@ -797,7 +797,7 @@ func (s *FirewallService) updateHuaweiFirewallRule(rule *model.FirewallRule, new
 	// 更新数据库中的规则信息
 	if result != nil {
 		if err := s.repo.Update(rule); err != nil {
-			log.Printf("Warning: Failed to update rule in database: %v", err)
+			logger.Warnf("Warning: Failed to update rule in database: %v", err)
 		}
 	}
 
@@ -828,10 +828,10 @@ func (s *FirewallService) createAndUpdateHuaweiFirewallRule(rule *model.Firewall
 
 	// 更新数据库中的IP
 	if err := s.repo.UpdateIP(rule.ID, currentIP); err != nil {
-		log.Printf("Failed to update IP in database: %v", err)
+		logger.Errorf("Failed to update IP in database: %v", err)
 	}
 
-	log.Printf("Successfully created/updated Huawei Cloud firewall rule for instance %s with IP %s",
+	logger.Printf("Successfully created/updated Huawei Cloud firewall rule for instance %s with IP %s",
 		rule.InstanceID, currentIP)
 
 	return result, nil
