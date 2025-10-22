@@ -34,19 +34,37 @@ docker run -d \
 
 1. 前往 [Release 页面](https://github.com/lm379/FireFlow/releases) 下载对应架构的二进制包
 2. 解压并运行：
+   以linux-amd64(x64)为例   
    ```bash
    tar -xzf fireflow-linux-amd64.tar.gz
    mv fireflow-linux-amd64 fireflow
    ./fireflow
    ```
 
+
+## 🛡️ 账号与安全
+
+- **默认账号**：`admin`
+- **默认密码**：`password`
+- **首次登录后请务必修改密码！**
+
+### 密码重置方法
+- 二进制运行环境下：
+  ```bash
+  ./fireflow reset
+  ```
+- Docker 运行环境下：
+  ```bash
+  docker exec -it fireflow ./fireflow reset
+  ```
+
 ## ⚠️ 重要提醒
 
 > **安全须知**
 > - 请妥善保管各云厂商的 API 密钥
 > - 不要将服务端口暴露到公网
-> - 密钥泄露造成的后果与本项目及作者无关
-
+> - **请勿设置过于简单的密码（如123456、password等），否则存在极高的安全风险。**
+> - **因弱密码或未及时修改默认密码或自己泄露API密钥等导致的任何安全问题，均由使用者自行承担，项目及作者不承担相关责任。**
 
 ## ⚙️ 配置指南
 
