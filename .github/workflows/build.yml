@@ -51,6 +51,20 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
+          # Android builds with NDK
+          - goos: android
+            goarch: arm64
+            cgo_enabled: 1
+            cc: aarch64-linux-android24-clang
+          - goos: android
+            goarch: arm
+            goarm: 7
+            cgo_enabled: 1
+            cc: armv7a-linux-androideabi24-clang
+          - goos: android
+            goarch: amd64
+            cgo_enabled: 1
+            cc: x86_64-linux-android24-clang
 
     steps:
       - name: Checkout code
@@ -65,6 +79,28 @@ jobs:
         with:
           go-version: '1.24'
           cache: true
+
+      - name: Set up Android NDK
+        if: matrix.goos == 'android'
+        run: |
+          echo "📦 Installing Android NDK..."
+          
+          # Install Android SDK command-line tools
+          sudo apt-get update
+          sudo apt-get install -y wget unzip
+          
+          # Download and install Android NDK
+          NDK_VERSION="r26d"
+          NDK_URL="https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+          
+          wget -q "${NDK_URL}" -O ndk.zip
+          unzip -q ndk.zip
+          
+          export ANDROID_NDK_HOME="${PWD}/android-ndk-${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+          echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+          
+          echo "✅ Android NDK installed at ${ANDROID_NDK_HOME}"
 
       - name: Get dependencies
         run: go mod download
@@ -88,10 +124,11 @@ jobs:
 
       - name: Build binary
         env:
-          CGO_ENABLED: 0
+          CGO_ENABLED: ${{ matrix.cgo_enabled || '0' }}
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
+          CC: ${{ matrix.cc }}
         run: |
           # Determine file extension
           ext=""
@@ -102,6 +139,12 @@ jobs:
           # Build output filename
           output="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
           archive="fireflow-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+          
+          # Set up Android NDK compiler path if building for Android
+          if [[ "${{ matrix.goos }}" == "android" ]]; then
+            export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.cc }}"
+            echo "Using Android NDK compiler: ${CC}"
+          fi
           
           # Build the binary with optimizations
           echo "Building ${output} for ${{ matrix.goos }}/${{ matrix.goarch }}..."
