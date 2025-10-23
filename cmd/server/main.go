@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/viper"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 	_ "modernc.org/sqlite"
 )
 
@@ -456,6 +457,7 @@ func main() {
 	}), &gorm.Config{
 		// 添加数据库连接池配置
 		DisableForeignKeyConstraintWhenMigrating: true,
+		Logger:                                   gormlogger.Default.LogMode(gormlogger.Silent), // 设置GORM日志为静默模式
 	})
 	if err != nil {
 		logger.ErrorLogger.Fatalf("Failed to connect to database: %v", err)
