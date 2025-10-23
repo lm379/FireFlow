@@ -2,11 +2,13 @@
 
 一个专为多云环境设计的智能防火墙规则管理工具，支持动态 IP 更新和统一管理界面。
 
+项目地址: [Github](https://github.com/lm379/fireflow)  [Gitee](https://gitee.com/lm379/fireflow) [CNB](https://cnb.cool/lm379/fireflow)
+
 ## 🔧 功能特性
 
 ### ✅ 已实现
 - **数据存储**：使用 SQLite 数据库存储配置和规则
-- **多云支持**：腾讯云轻量应用服务器、阿里云 ECS、华为云 ECS/Flexus（仅支持中国站）
+- **多云支持**：腾讯云轻量应用服务器、阿里云 ECS/轻量应用云服务器、华为云 ECS/Flexus（仅支持中国站）
 - **智能更新**：定时任务自动检测并更新 IP 地址
 - **管理界面**：直观的 Web 管理控制台
 - **API 接口**：完整的 RESTful API 支持
@@ -15,12 +17,20 @@
 
 FireFlow 提供了现代化的 Web 管理界面，基于 Vue 3 + TypeScript 开发。
 
-- **GitHub**: [fireflow-frontend](https://github.com/lm379/fireflow-frontend)
+- **GitHub**: [FireFlow-Frontend](https://github.com/lm379/fireflow-frontend)
+- **cnb**: [FireFlow-Frontend](https://cnb.cool/lm379/fireflow-frontend)
 - **技术栈**: Vue 3 + TypeScript + Vite
 
 ## 🚀 快速开始
 
 ### Docker 部署（推荐）
+本项目支持多平台镜像仓库，您可以根据需要选择拉取：
+- **Docker Hub**: `lm379/fireflow:latest`
+- **GitHub Container Registry (ghcr)**: `ghcr.io/lm379/fireflow:latest`
+- **CNB 制品库**: `docker.cnb.cool/lm379/fireflow:latest`
+- **华为云 SWR**: `swr.cn-southwest-2.myhuaweicloud.com/lm379/fireflow:latest`
+
+中国大陆推荐选择 `CNB制品库`
 
 ```bash
 docker run -d \
@@ -28,6 +38,9 @@ docker run -d \
     -p 9686:9686 \
     -v ./configs:/app/configs \
     lm379/fireflow:latest
+    # ghcr.io/lm379/fireflow:latest
+    # docker.cnb.cool/lm379/fireflow:latest
+    # swr.cn-southwest-2.myhuaweicloud.com/lm379/fireflow:latest
 ```
 
 ### 二进制部署
