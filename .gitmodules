@@ -1,3 +1,3 @@
 [submodule "frontend"]
 	path = frontend
-	url = ../FireFlow-Frontend
+	url = ../fireflow-frontend
