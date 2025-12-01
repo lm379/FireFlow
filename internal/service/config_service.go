@@ -164,6 +164,8 @@ func (s *configService) TestCloudConfig(id uint) (*CloudTestResult, error) {
 		return s.testAliyunInstance(&config)
 	case "HuaweiCloud":
 		return s.testHuaweiInstance(&config)
+	case "Azure":
+		return s.testAzureInstance(&config)
 	default:
 		logger.Error("不支持的云服务商: ", config.Provider)
 		return &CloudTestResult{
@@ -414,6 +416,76 @@ func (s *configService) MigrateCloudConfigFromYAML(yamlConfig map[string]interfa
 	}
 
 	return nil
+}
+
+func (s *configService) testAzureInstance(config *model.CloudProviderConfig) (*CloudTestResult, error) {
+	// Azure 必须配置 TenantID 和 ProjectID
+	if config.TenantID == "" {
+		logger.Error("Azure 配置错误：TenantID 为空，请配置租户ID")
+		return &CloudTestResult{
+			Success: false,
+			Message: "Azure 配置错误：TenantID 为空，请配置租户ID",
+		}, nil
+	}
+
+	if config.ProjectID == "" {
+		logger.Error("Azure 配置错误：ProjectID 为空，请配置资源组名称")
+		return &CloudTestResult{
+			Success: false,
+			Message: "Azure 配置错误：ProjectID 为空，请配置资源组名称",
+		}, nil
+	}
+
+	// 构造 Azure 配置
+	azureConfig := cloud.AzureConfig{
+		SubscriptionID:    config.SubscriptionID,
+		TenantID:          config.TenantID,
+		ClientID:          config.SecretId,
+		ClientSecret:      config.SecretKey,
+		ResourceGroupName: config.ProjectID,
+		SecurityGroupName: config.InstanceId,
+		Location:          config.Region,
+	}
+
+	// 创建 Azure 客户端
+	client, err := cloud.NewAzureClient(azureConfig)
+	if err != nil {
+		logger.Error("创建 Azure 客户端失败: ", err)
+		return &CloudTestResult{
+			Success: false,
+			Message: fmt.Sprintf("创建 Azure 客户端失败: %v", err),
+		}, err
+	}
+
+	// 如果没有配置安全组名称，只测试凭证
+	if config.InstanceId == "" {
+		logger.Warnf("Azure 凭证验证成功，订阅ID: %s，但未配置网络安全组名称", config.SubscriptionID)
+		return &CloudTestResult{
+			Success:        true,
+			Message:        fmt.Sprintf("Azure 凭证验证成功，订阅ID: %s，但未配置网络安全组名称", config.SubscriptionID),
+			InstanceExists: false,
+		}, nil
+	}
+
+	// 通过获取防火墙规则列表来验证网络安全组是否存在
+	rules, err := client.ListFirewallRules(config.InstanceId)
+	if err != nil {
+		logger.Error("网络安全组验证失败: ", err)
+		return &CloudTestResult{
+			Success:        false,
+			Message:        fmt.Sprintf("网络安全组验证失败: %v", err),
+			InstanceExists: false,
+		}, err
+	}
+
+	// 构造成功消息
+	message := fmt.Sprintf("Azure 网络安全组验证成功，安全组名称: %s，当前规则数量: %d，资源组: %s，订阅ID: %s",
+		config.InstanceId, len(rules), config.ProjectID, config.SubscriptionID)
+
+	return &CloudTestResult{
+		Success: true,
+		Message: message,
+	}, nil
 }
 
 // 辅助方法

@@ -18,15 +18,17 @@ type ConfigItem struct {
 // CloudProviderConfig 云服务商配置模型
 type CloudProviderConfig struct {
 	gorm.Model
-	Provider    string `gorm:"type:varchar(50);not null;comment:云服务商名称" json:"provider"`
-	SecretId    string `gorm:"type:varchar(255);comment:访问密钥ID" json:"secret_id"`
-	SecretKey   string `gorm:"type:varchar(255);comment:访问密钥Key" json:"secret_key"`
-	Region      string `gorm:"type:varchar(100);comment:区域" json:"region"`
-	Type        int    `gorm:"default:0;comment:实例类型(ECS:0,轻量云:1)" json:"type"`
-	InstanceId  string `gorm:"type:varchar(255);comment:实例ID" json:"instance_id"`
-	ProjectID   string `gorm:"type:varchar(255);comment:项目ID(仅华为云)" json:"project_id"`
-	Extra       string `gorm:"type:text;comment:额外配置(JSON格式)" json:"extra"`
-	IsDefault   bool   `gorm:"default:false;comment:是否为默认配置" json:"is_default"`
-	IsEnabled   bool   `gorm:"default:true;comment:是否启用" json:"is_enabled"`
-	Description string `gorm:"type:varchar(255);comment:配置描述" json:"description"`
+	Provider       string `gorm:"type:varchar(50);not null;comment:云服务商名称" json:"provider"`
+	SecretId       string `gorm:"type:varchar(255);comment:访问密钥ID" json:"secret_id"`
+	SecretKey      string `gorm:"type:varchar(255);comment:访问密钥Key" json:"secret_key"`
+	Region         string `gorm:"type:varchar(100);comment:区域" json:"region"`
+	Type           int    `gorm:"default:0;comment:实例类型(ECS:0,轻量云:1)" json:"type"`
+	InstanceId     string `gorm:"type:varchar(255);comment:实例ID" json:"instance_id"`
+	ProjectID      string `gorm:"type:varchar(255);comment:项目ID/资源组名称(华为云/Azure)" json:"project_id"`
+	TenantID       string `gorm:"type:varchar(255);comment:租户ID(仅Azure)" json:"tenant_id"`
+	SubscriptionID string `gorm:"type:varchar(255);comment:订阅ID(仅Azure)" json:"subscription_id"`
+	Extra          string `gorm:"type:text;comment:额外配置(JSON格式)" json:"extra"`
+	IsDefault      bool   `gorm:"default:false;comment:是否为默认配置" json:"is_default"`
+	IsEnabled      bool   `gorm:"default:true;comment:是否启用" json:"is_enabled"`
+	Description    string `gorm:"type:varchar(255);comment:配置描述" json:"description"`
 }

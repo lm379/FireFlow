@@ -162,3 +162,55 @@ docker run -d \
 3. 复制实例关联的安全组 ID
 
 ![华为云安全组](./docs/images/huawei/huawei7.png)
+
+### 🔹 Azure
+
+#### 1. 创建应用注册
+
+1. 以管理员账号登录 [Azure 门户](https://portal.azure.com/)
+2. 搜索并进入 "应用注册"
+
+    ![Azure 应用注册](./docs/images/azure/azure1.png)
+
+3. 点击 "新建注册"，输入应用名称，选择 "受支持的账户类型" 为 "任何组织目录中的账户和个人 Microsoft 账户"，然后创建。
+
+    ![Azure 应用注册](./docs/images/azure/azure2.png)   
+
+4. 在应用概述页面，记录 "应用程序(客户端) ID"（对应 AK）和 "目录（租户）ID"（对应租户 ID）。
+
+    ![Azure 应用概述](./docs/images/azure/azure3.png)
+
+5. 点击左侧 "证书和密码"，创建新客户端密码，设置到期时间。
+
+    ![Azure 密码创建](./docs/images/azure/azure4.png)
+
+6. 记录生成的密码值（对应 SK）。  
+
+    **注意：密码仅显示一次，务必妥善保存。如果遗忘，建议删除现有密码并重新创建。**
+
+   ![Azure 密码值](./docs/images/azure/azure5.png)
+
+#### 2. 获取资源信息
+
+1. 找到虚拟机对应的网络安全组。
+2. 在安全组概述页面，记录 "网络安全组名称"（对应实例 ID/安全组 ID）、"资源组名称"（对应 Resource Group）和 "订阅 ID"（对应 Subscription ID）
+
+    ![Azure 资源信息](./docs/images/azure/azure6.png)
+
+#### 3. 授权应用
+
+1. 返回资源组，点击左侧 "访问控制" → "添加角色分配"
+
+    ![Azure 访问控制](./docs/images/azure/azure7.png)
+
+2. 搜索 "网络参与者" 角色，点击选中
+
+   ![Azure 角色搜索](./docs/images/azure/azure8.png)
+
+3. 点击 "成员" → "添加成员"，搜索并选择刚才创建的应用
+
+   ![Azure 添加成员](./docs/images/azure/azure9.png)
+
+4. 点击 "审阅和分配" 完成授权。
+
+5. 返回 FireFlow，输入上述信息，点击测试。如果成功，将显示当前安全组信息。

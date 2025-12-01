@@ -19,6 +19,7 @@ type FirewallService struct {
 	tencentClient *cloud.TencentClient
 	aliyunClient  *cloud.AliyunClient
 	huaweiClient  *cloud.HuaweiClient
+	azureClient   *cloud.AzureClient
 	configService ConfigService
 	// 添加互斥锁防止并发更新
 	updateMutex sync.RWMutex
@@ -179,6 +180,8 @@ func (s *FirewallService) processRule(rule model.FirewallRule, currentIP string)
 		updateErr = s.updateAliyunFirewallRule(&rule, currentIP)
 	case "HuaweiCloud":
 		updateErr = s.updateHuaweiFirewallRule(&rule, currentIP)
+	case "Azure":
+		updateErr = s.updateAzureFirewallRule(&rule, currentIP)
 	default:
 		updateErr = fmt.Errorf("unsupported provider: %s", rule.Provider)
 	}
@@ -452,6 +455,8 @@ func (s *FirewallService) ExecuteRule(id uint) (map[string]interface{}, error) {
 		cloudResult, updateErr = s.createAndUpdateAliyunFirewallRule(rule, currentIP)
 	case "HuaweiCloud":
 		cloudResult, updateErr = s.createAndUpdateHuaweiFirewallRule(rule, currentIP)
+	case "Azure":
+		cloudResult, updateErr = s.createAndUpdateAzureFirewallRule(rule, currentIP)
 	default:
 		updateErr = fmt.Errorf("unsupported provider: %s", rule.Provider)
 	}
@@ -842,6 +847,182 @@ func (s *FirewallService) GetHuaweiInstanceInfo(instanceID string, cloudConfigID
 	client, err := s.getHuaweiClient(cloudConfigID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Huawei Cloud client: %v", err)
+	}
+
+	return client.GetInstance(instanceID)
+}
+
+// getAzureClient 获取 Azure 客户端
+func (s *FirewallService) getAzureClient(cloudConfigID uint) (*cloud.AzureClient, error) {
+	// 如果有全局客户端，直接使用
+	if s.azureClient != nil {
+		return s.azureClient, nil
+	}
+
+	// 否则根据配置ID创建客户端
+	if s.configService == nil {
+		return nil, fmt.Errorf("config service not available")
+	}
+
+	config, err := s.configService.GetCloudConfigByID(cloudConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cloud config: %v", err)
+	}
+
+	if config.Provider != "Azure" {
+		return nil, fmt.Errorf("invalid provider: expected Azure, got %s", config.Provider)
+	}
+
+	// 解析 Azure 配置
+	azureConfig := cloud.AzureConfig{
+		SubscriptionID:    config.SubscriptionID,
+		TenantID:          config.TenantID,
+		ClientID:          config.SecretId,
+		ClientSecret:      config.SecretKey,
+		ResourceGroupName: config.ProjectID,
+		SecurityGroupName: config.InstanceId, // 在云配置中，实例ID字段用于存储网络安全组名称
+		Location:          config.Region,
+	}
+
+	client, err := cloud.NewAzureClient(azureConfig)
+	if err != nil {
+		return nil, fmt.Errorf("创建 Azure 客户端失败: %v", err)
+	}
+	return client, nil
+}
+
+// updateAzureFirewallRule 更新 Azure 防火墙规则
+func (s *FirewallService) updateAzureFirewallRule(rule *model.FirewallRule, newIP string) error {
+	client, err := s.getAzureClient(rule.CloudConfigID)
+	if err != nil {
+		return fmt.Errorf("failed to get Azure client: %v", err)
+	}
+
+	// 创建防火墙规则规格
+	ruleSpec := &cloud.FirewallRuleSpec{
+		Port:        rule.Port,
+		Protocol:    rule.Protocol,
+		CidrBlock:   fmt.Sprintf("%s/32", newIP),
+		Action:      "ACCEPT",
+		Description: rule.Remark,
+	}
+
+	// 更新规则
+	result, err := client.UpdateFirewallRule(rule.InstanceID, ruleSpec, newIP)
+	if err != nil {
+		// 如果更新失败，可能是规则已被手动删除，尝试重新创建
+		errStr := err.Error()
+		if strings.Contains(errStr, "not found") ||
+			strings.Contains(errStr, "rule does not exist") {
+			logger.Warnf("Rule ID %d not found in cloud, attempting to recreate", rule.ID)
+
+			// 尝试重新创建规则
+			_, createErr := client.CreateFirewallRule(rule.InstanceID, ruleSpec)
+			if createErr != nil {
+				return fmt.Errorf("failed to recreate Azure firewall rule after rule not found: %v", createErr)
+			}
+
+			// 更新数据库中的规则信息
+			if err := s.repo.Update(rule); err != nil {
+				logger.Errorf("Failed to update rule in database: %v", err)
+			}
+
+			logger.Printf("Successfully recreated Azure firewall rule for instance %s: %s",
+				rule.InstanceID, newIP)
+			return nil
+		}
+		return fmt.Errorf("failed to update Azure firewall rule: %v", err)
+	}
+
+	// 更新数据库中的规则信息
+	if result != nil {
+		if err := s.repo.Update(rule); err != nil {
+			logger.Warnf("Warning: Failed to update rule in database: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// createAndUpdateAzureFirewallRule 创建并更新 Azure 防火墙规则
+func (s *FirewallService) createAndUpdateAzureFirewallRule(rule *model.FirewallRule, currentIP string) (*cloud.FirewallRuleResult, error) {
+	client, err := s.getAzureClient(rule.CloudConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Azure client: %v", err)
+	}
+
+	// 创建防火墙规则规格
+	ruleSpec := &cloud.FirewallRuleSpec{
+		Port:        rule.Port,
+		Protocol:    rule.Protocol,
+		CidrBlock:   fmt.Sprintf("%s/32", currentIP),
+		Action:      "ACCEPT",
+		Description: rule.Remark,
+	}
+
+	// 创建或更新规则
+	result, err := client.UpdateFirewallRule(rule.InstanceID, ruleSpec, currentIP)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create/update Azure firewall rule: %v", err)
+	}
+
+	// 更新数据库中的IP
+	if err := s.repo.UpdateIP(rule.ID, currentIP); err != nil {
+		logger.Errorf("Failed to update IP in database: %v", err)
+	}
+
+	logger.Printf("Successfully created/updated Azure firewall rule for instance %s with IP %s",
+		rule.InstanceID, currentIP)
+
+	return result, nil
+}
+
+// CreateAzureFirewallRule 创建新的 Azure 防火墙规则并保存到数据库
+func (s *FirewallService) CreateAzureFirewallRule(instanceID, port, cidrBlock, protocol, description string, cloudConfigID uint) error {
+	client, err := s.getAzureClient(cloudConfigID)
+	if err != nil {
+		return fmt.Errorf("failed to get Azure client: %v", err)
+	}
+
+	// 创建防火墙规则规格
+	ruleSpec := &cloud.FirewallRuleSpec{
+		Port:        port,
+		Protocol:    protocol,
+		CidrBlock:   cidrBlock,
+		Action:      "ACCEPT",
+		Description: description,
+	}
+
+	// 创建规则
+	_, err = client.CreateFirewallRule(instanceID, ruleSpec)
+	if err != nil {
+		return fmt.Errorf("failed to create Azure firewall rule: %v", err)
+	}
+
+	// 保存到数据库
+	rule := &model.FirewallRule{
+		Remark:        description,
+		InstanceID:    instanceID,
+		Port:          port,
+		Protocol:      protocol,
+		Provider:      "Azure",
+		Enabled:       true,
+		CloudConfigID: cloudConfigID,
+	}
+
+	if err := s.repo.Create(rule); err != nil {
+		return fmt.Errorf("failed to save rule to database: %v", err)
+	}
+
+	logger.Printf("Successfully created and saved Azure firewall rule for instance %s", instanceID)
+	return nil
+}
+
+// GetAzureInstanceInfo 获取 Azure 实例信息
+func (s *FirewallService) GetAzureInstanceInfo(instanceID string, cloudConfigID uint) (*cloud.InstanceInfo, error) {
+	client, err := s.getAzureClient(cloudConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Azure client: %v", err)
 	}
 
 	return client.GetInstance(instanceID)
