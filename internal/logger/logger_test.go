@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -77,7 +78,8 @@ func TestFileOutputUsesConfiguredRotationAndReinitializes(t *testing.T) {
 	if _, err := GetGinLogWriter().Write([]byte("request message\n")); err != nil {
 		t.Fatal(err)
 	}
-	for file, message := range map[string]string{"app.log": "application message", "error.log": "error message", "gin.log": "request message"} {
+	day := time.Now().Format("2006-01-02")
+	for file, message := range map[string]string{"app-" + day + ".log": "application message", "error-" + day + ".log": "error message", "gin-" + day + ".log": "request message"} {
 		data, err := os.ReadFile(filepath.Join(dir, file))
 		if err != nil || !strings.Contains(string(data), message) {
 			t.Fatalf("%s: data=%s err=%v", file, data, err)
@@ -92,7 +94,7 @@ func TestFileOutputUsesConfiguredRotationAndReinitializes(t *testing.T) {
 		t.Fatal("old rotating outputs retained after reinitialization")
 	}
 	Printf("console message")
-	data, err := os.ReadFile(filepath.Join(dir, "app.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "app-"+day+".log"))
 	if err != nil || strings.Contains(string(data), "console message") {
 		t.Fatalf("file output remained enabled: %s, %v", data, err)
 	}

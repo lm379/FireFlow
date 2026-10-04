@@ -25,6 +25,8 @@ JWT 到期返回 HTTP `401`，响应为：
 
 其他认证失败的 `code` 为 `401`，原因包括 `MISSING_AUTH_HEADER`、`INVALID_AUTH_HEADER`、`TOKEN_MALFORMED`、`TOKEN_INVALID_SIGNATURE` 和 `TOKEN_INVALID`。未知 API 路径、错误请求方法及未处理异常也使用统一错误结构。
 
+管理员初始化和重置时生成随机临时密码，只在命令行输出，数据库仅保存 bcrypt 哈希。临时密码登录后，只能访问当前用户、首次登录状态、修改密码和退出登录接口；业务接口及令牌刷新返回 HTTP `403`，`reason` 为 `PASSWORD_CHANGE_REQUIRED`。修改密码必须使用不同于旧密码的新密码；密码、令牌版本和首次登录状态在同一事务中更新，修改或重置成功后已有令牌失效。
+
 ## 启用和禁用
 
 规则使用 `POST /api/v1/rules/:id/status`，服务器实例使用 `POST /api/v1/cloud-configs/:id/status`，均需要登录认证。

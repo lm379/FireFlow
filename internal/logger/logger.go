@@ -6,11 +6,9 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // 全局logger实例
@@ -18,7 +16,7 @@ var (
 	InfoLogger  = newLogger(os.Stdout, logrus.InfoLevel)
 	ErrorLogger = newLogger(os.Stderr, logrus.WarnLevel)
 	GinLogger   = newLogger(io.Discard, logrus.InfoLevel)
-	fileOutputs []*lumberjack.Logger
+	fileOutputs []*dailyWriter
 )
 
 // Config 日志配置结构
@@ -27,8 +25,8 @@ type Config struct {
 	EnableGinLogger  bool
 	EnableFileOutput bool
 	MaxFileSize      int  // 单个日志文件最大大小(MB)
-	MaxBackups       int  // 保留的备份文件数量
-	MaxAge           int  // 保留文件的最大天数
+	MaxBackups       int  // 每天每类日志保留的大小轮转备份数量
+	MaxAge           int  // 保留的自然日数量，包含当天
 	Compress         bool // 是否压缩旧文件
 }
 
@@ -40,7 +38,7 @@ func Init() error {
 		EnableFileOutput: true,
 		MaxFileSize:      100,  // 100MB
 		MaxBackups:       7,    // 保留7个备份文件
-		MaxAge:           30,   // 保留30天
+		MaxAge:           7,    // 保留当天及前6天
 		Compress:         true, // 压缩旧文件
 	})
 }
@@ -62,25 +60,27 @@ func initWithConfig(config Config, logDir string, stdout, stderr io.Writer) erro
 	if config.MaxBackups == 0 {
 		config.MaxBackups = 7
 	}
-	if config.MaxAge == 0 {
-		config.MaxAge = 30
+	if config.MaxAge <= 0 {
+		config.MaxAge = 7
 	}
 	level, err := logrus.ParseLevel(config.Level)
 	if err != nil {
 		level = logrus.InfoLevel
 	}
 
-	var rotators []*lumberjack.Logger
+	if err := Close(); err != nil {
+		return err
+	}
+	var rotators []*dailyWriter
+	var initErr error
 	output := func(console io.Writer, filename string) io.Writer {
 		if !config.EnableFileOutput {
 			return console
 		}
-		rotator := &lumberjack.Logger{
-			Filename:   filepath.Join(logDir, filename),
-			MaxSize:    config.MaxFileSize,
-			MaxBackups: config.MaxBackups,
-			MaxAge:     config.MaxAge,
-			Compress:   config.Compress,
+		rotator, err := newDailyWriter(logDir, filename, config)
+		if err != nil {
+			initErr = errors.Join(initErr, err)
+			return console
 		}
 		rotators = append(rotators, rotator)
 		return io.MultiWriter(console, rotator)
@@ -93,9 +93,11 @@ func initWithConfig(config Config, logDir string, stdout, stderr io.Writer) erro
 	}
 	ginLog := newLogger(ginOutput, level)
 
-	// Initialization takes place before request handling starts.
-	if err := Close(); err != nil {
-		return err
+	if initErr != nil {
+		for _, writer := range rotators {
+			_ = writer.Close()
+		}
+		return initErr
 	}
 	fileOutputs = rotators
 	InfoLogger, ErrorLogger, GinLogger = info, errorLog, ginLog

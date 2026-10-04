@@ -47,8 +47,8 @@ logging:
   enable_gin_logger: true        # 是否启用Gin HTTP请求日志
   enable_file_output: true       # 是否输出日志到文件
   max_file_size: 100             # 日志文件最大大小(MB)
-  max_backups: 7                 # 保留的备份文件数量
-  max_age: 30                    # 保留文件的最大天数
+  max_backups: 7                 # 每天每类日志的大小轮转备份数量
+  max_age: 7                     # 保留当天及前6天的日志
   compress: true                 # 是否压缩旧文件
 
 security:
@@ -233,7 +233,7 @@ func handleResetCommand() {
 	fmt.Println("正在重置管理员账户...")
 
 	// 初始化基本配置
-	if err := logger.Init(); err != nil {
+	if err := logger.InitWithConfig(logger.Config{Level: "info"}); err != nil {
 		fmt.Printf("日志初始化失败: %v\n", err)
 		return
 	}
@@ -324,8 +324,8 @@ func main() {
 		}
 	}
 
-	// 初始化日志系统
-	if err := logger.Init(); err != nil {
+	// 配置加载前只输出到控制台，避免按默认天数提前清理文件。
+	if err := logger.InitWithConfig(logger.Config{Level: "info"}); err != nil {
 		logrus.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Close()
@@ -378,6 +378,11 @@ func main() {
 		}
 	}
 
+	// 文件名和过期清理使用配置的服务器时区。
+	if err := setupTimezone(); err != nil {
+		logger.ErrorLogger.Fatalf("Failed to setup timezone: %v", err)
+	}
+
 	// 重新初始化日志系统（基于配置文件）
 	logConfig := logger.Config{
 		Level:            viper.GetString("logging.level"),
@@ -390,11 +395,6 @@ func main() {
 	}
 	if err := logger.InitWithConfig(logConfig); err != nil {
 		logger.ErrorLogger.Fatalf("Failed to reinitialize logger with config: %v", err)
-	}
-
-	// 设置时区
-	if err := setupTimezone(); err != nil {
-		logger.ErrorLogger.Fatalf("Failed to setup timezone: %v", err)
 	}
 
 	// 设置JWT密钥
