@@ -30,6 +30,7 @@ func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallSe
 	// 需要认证的路由组
 	protectedRoutes := router.Group("/")
 	protectedRoutes.Use(middleware.JWTAuthMiddleware())
+	protectedRoutes.Use(middleware.RequirePasswordChangeCompleted(authService))
 	{
 		// 认证用户相关路由
 		authProtectedRoutes := protectedRoutes.Group("/auth")

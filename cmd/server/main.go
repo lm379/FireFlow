@@ -223,7 +223,7 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("用法:")
 	fmt.Println("  ./fireflow          启动服务器")
-	fmt.Println("  ./fireflow reset    重置管理员密码为 'password'")
+	fmt.Println("  ./fireflow reset    生成随机临时密码并重置管理员账户")
 	fmt.Println("  ./fireflow help     显示此帮助信息")
 	fmt.Println()
 }
@@ -295,14 +295,16 @@ func handleResetCommand() {
 	authService := service.NewAuthService(authRepo)
 
 	// 重置管理员密码
-	if err := authService.ResetAdminPassword(); err != nil {
+	password, err := authService.ResetAdminPassword()
+	if err != nil {
 		fmt.Printf("重置管理员密码失败: %v\n", err)
 		return
 	}
 
 	fmt.Println("✅ 管理员账户重置成功！")
 	fmt.Println("   用户名: admin")
-	fmt.Println("   密码: password")
+	fmt.Printf("   临时密码: %s\n", password)
+	fmt.Println("   登录后必须修改密码，已有令牌已失效。")
 }
 
 func main() {
@@ -463,8 +465,12 @@ func main() {
 	middleware.SetTokenValidator(authService)
 
 	// Initialize default admin user
-	if err := authService.InitializeDefaultUser(); err != nil {
+	temporaryPassword, err := authService.InitializeDefaultUser()
+	if err != nil {
 		logger.ErrorLogger.Fatalf("Failed to initialize default user: %v", err)
+	}
+	if temporaryPassword != "" {
+		fmt.Printf("管理员账户已创建。用户名: admin\n临时密码: %s\n登录后必须修改密码。请妥善保管，此密码仅在创建时显示。\n", temporaryPassword)
 	}
 
 	// 初始化定时任务管理器
