@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"FireFlow/internal/response"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -20,13 +21,6 @@ type ServiceTypeInfo struct {
 	Name        string `json:"name"`         // 英文名称
 	DisplayName string `json:"display_name"` // 中文显示名称
 	Description string `json:"description"`  // 描述
-}
-
-// ServiceTypeResponse 服务类型响应
-type ServiceTypeResponse struct {
-	Code    int               `json:"code"`
-	Message string            `json:"message"`
-	Data    []ServiceTypeInfo `json:"data"`
 }
 
 // 定义所有服务类型数据
@@ -73,27 +67,15 @@ var allServiceTypes = map[string][]ServiceTypeInfo{
 func (h *ServiceTypeHandler) GetServiceTypesByProvider(c *gin.Context) {
 	provider := c.Param("provider")
 	if provider == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "云服务商参数不能为空",
-			"data":    nil,
-		})
+		c.JSON(http.StatusBadRequest, response.ErrorCode(http.StatusBadRequest, "云服务商参数不能为空"))
 		return
 	}
 
 	serviceTypes, exists := allServiceTypes[provider]
 	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "不支持的云服务商",
-			"data":    nil,
-		})
+		c.JSON(http.StatusNotFound, response.ErrorCode(http.StatusNotFound, "不支持的云服务商"))
 		return
 	}
 
-	c.JSON(http.StatusOK, ServiceTypeResponse{
-		Code:    200,
-		Message: "获取服务类型成功",
-		Data:    serviceTypes,
-	})
+	c.JSON(http.StatusOK, response.Success(serviceTypes, "获取服务类型成功"))
 }

@@ -5,8 +5,10 @@ import (
 	"FireFlow/internal/core"
 	"FireFlow/internal/logger"
 	"FireFlow/internal/middleware"
+	"FireFlow/internal/migration"
 	"FireFlow/internal/model"
 	"FireFlow/internal/repository"
+	"FireFlow/internal/response"
 	"FireFlow/internal/service"
 	"crypto/rand"
 	"embed"
@@ -53,52 +55,6 @@ security:
   jwt_secret: ""                 # JWT密钥，留空将自动生成
   expire_time: 72                # JWT过期时间(小时)  
 `
-
-// ginLoggerMiddleware 自定义GIN日志中间件
-func ginLoggerMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		start := time.Now()
-		path := c.Request.URL.Path
-		raw := c.Request.URL.RawQuery
-
-		// 处理请求
-		c.Next()
-
-		// 记录日志
-		end := time.Now()
-		latency := end.Sub(start)
-		clientIP := c.ClientIP()
-		method := c.Request.Method
-		statusCode := c.Writer.Status()
-
-		if raw != "" {
-			path = path + "?" + raw
-		}
-
-		// 根据状态码决定日志级别
-		if statusCode >= 400 {
-			if logger.GinLogger != nil {
-				logger.GinLogger.Errorf("%3d | %13v | %15s | %-7s %s",
-					statusCode,
-					latency,
-					clientIP,
-					method,
-					path,
-				)
-			}
-		} else {
-			if logger.GinLogger != nil {
-				logger.GinLogger.Infof("%3d | %13v | %15s | %-7s %s",
-					statusCode,
-					latency,
-					clientIP,
-					method,
-					path,
-				)
-			}
-		}
-	}
-}
 
 // createDefaultConfig 创建默认配置文件
 func createDefaultConfig(configPath string) error {
@@ -370,6 +326,8 @@ func main() {
 	if err := logger.Init(); err != nil {
 		logrus.Fatalf("Failed to initialize logger: %v", err)
 	}
+	defer logger.Close()
+
 	if err := godotenv.Load(); err != nil {
 		// logger.InfoLogger.Info("No .env file found, using system environment variables")
 	} else {
@@ -456,8 +414,7 @@ func main() {
 		DSN:        dsn,
 	}), &gorm.Config{
 		// 添加数据库连接池配置
-		DisableForeignKeyConstraintWhenMigrating: true,
-		Logger:                                   gormlogger.Default.LogMode(gormlogger.Silent), // 设置GORM日志为静默模式
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent), // 设置GORM日志为静默模式
 	})
 	if err != nil {
 		logger.ErrorLogger.Fatalf("Failed to connect to database: %v", err)
@@ -473,6 +430,9 @@ func main() {
 	sqlDB.SetMaxOpenConns(1)    // SQLite 只支持单个写连接
 	sqlDB.SetMaxIdleConns(1)    // 保持一个空闲连接
 	sqlDB.SetConnMaxLifetime(0) // 连接不过期
+	if _, err := sqlDB.Exec("PRAGMA foreign_keys=ON;"); err != nil {
+		logger.ErrorLogger.Fatalf("Failed to enable database foreign keys: %v", err)
+	}
 
 	// 执行WAL模式初始化
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL;"); err != nil {
@@ -485,12 +445,7 @@ func main() {
 		logger.ErrorLogger.Warnf("Warning: Failed to set busy timeout: %v", err)
 	}
 	// Auto-migrate the schema
-	if err := db.AutoMigrate(
-		&model.FirewallRule{},
-		&model.ConfigItem{},
-		&model.CloudProviderConfig{},
-		&model.AuthUser{},
-	); err != nil {
+	if err := migration.Migrate(db); err != nil {
 		logger.ErrorLogger.Fatalf("Failed to migrate database: %v", err)
 	}
 
@@ -531,12 +486,27 @@ func main() {
 	gin.DisableConsoleColor() // 禁用控制台颜色以便于文件日志
 
 	r := gin.New()
+	r.HandleMethodNotAllowed = true
+	r.NoRoute(func(c *gin.Context) {
+		if middleware.IsAPIRequest(c) {
+			c.JSON(http.StatusNotFound, response.ErrorCode(http.StatusNotFound, "API route not found"))
+			return
+		}
+		c.Status(http.StatusNotFound)
+	})
+	r.NoMethod(func(c *gin.Context) {
+		if middleware.IsAPIRequest(c) {
+			c.JSON(http.StatusMethodNotAllowed, response.ErrorCode(http.StatusMethodNotAllowed, "Method not allowed"))
+			return
+		}
+		c.Status(http.StatusMethodNotAllowed)
+	})
 
 	// 使用默认的恢复中间件
-	r.Use(gin.Recovery())
+	r.Use(middleware.APIRecovery())
 
 	// 使用自定义的日志中间件
-	r.Use(ginLoggerMiddleware())
+	r.Use(logger.GinMiddleware())
 
 	// 根据运行模式配置CORS和前端路由
 	if appMode == "" {
@@ -581,7 +551,7 @@ func main() {
 		r.GET("/", func(c *gin.Context) {
 			data, err := frontend.Open("index.html")
 			if err != nil {
-				c.Status(404)
+				c.Status(http.StatusNotFound)
 				return
 			}
 			defer data.Close()
@@ -590,6 +560,10 @@ func main() {
 
 		// 对于所有其他路由，返回 index.html（SPA 路由支持）
 		r.NoRoute(func(c *gin.Context) {
+			if middleware.IsAPIRequest(c) {
+				c.JSON(http.StatusNotFound, response.ErrorCode(http.StatusNotFound, "API route not found"))
+				return
+			}
 			// 只对非 API 路径和非静态文件路径返回 index.html
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/") &&
 				!strings.HasPrefix(c.Request.URL.Path, "/static/") {

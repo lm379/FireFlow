@@ -4,6 +4,7 @@ import (
 	"FireFlow/internal/logger"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/robfig/cron/v3"
 )
@@ -29,7 +30,17 @@ func NewCronManager() *CronManager {
 
 // SetUpdateFunc 设置更新函数
 func (cm *CronManager) SetUpdateFunc(updateFunc func()) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
 	cm.updateFunc = updateFunc
+}
+
+// ValidateInterval rejects invalid intervals before replacing an existing job.
+func ValidateInterval(intervalMinutes int) error {
+	if intervalMinutes <= 0 || int64(intervalMinutes) > int64((1<<63-1)/time.Minute) {
+		return fmt.Errorf("interval must be a positive number of minutes within the supported duration")
+	}
+	return nil
 }
 
 // StartFirewallUpdateJob 启动防火墙更新任务
@@ -40,6 +51,9 @@ func (cm *CronManager) StartFirewallUpdateJob(intervalMinutes int) error {
 	if cm.updateFunc == nil {
 		return fmt.Errorf("update function not set")
 	}
+	if err := ValidateInterval(intervalMinutes); err != nil {
+		return err
+	}
 
 	// 如果已经有任务在运行，先停止
 	if cm.firewallJobID != 0 {
@@ -47,14 +61,8 @@ func (cm *CronManager) StartFirewallUpdateJob(intervalMinutes int) error {
 		cm.firewallJobID = 0
 	}
 
-	// 创建cron表达式：每N分钟执行一次
-	cronExpr := fmt.Sprintf("0 */%d * * * *", intervalMinutes)
-
-	// 添加新任务
-	jobID, err := cm.cron.AddFunc(cronExpr, cm.updateFunc)
-	if err != nil {
-		return err
-	}
+	// Use a duration so intervals remain consistent across hour boundaries.
+	jobID := cm.cron.Schedule(cron.Every(time.Duration(intervalMinutes)*time.Minute), cron.FuncJob(cm.updateFunc))
 
 	cm.firewallJobID = jobID
 	cm.isRunning = true
@@ -78,13 +86,13 @@ func (cm *CronManager) StopFirewallUpdateJob() {
 
 // ExecuteNow 立即执行一次更新任务
 func (cm *CronManager) ExecuteNow() error {
-	if cm.updateFunc == nil {
-		return fmt.Errorf("update function not set")
-	}
-
 	cm.mutex.RLock()
+	updateFunc := cm.updateFunc
 	interval := cm.intervalMinutes
 	cm.mutex.RUnlock()
+	if updateFunc == nil {
+		return fmt.Errorf("update function not set")
+	}
 
 	if interval > 0 {
 		logger.Printf("Executing firewall update job immediately... (scheduled interval: %d minutes)", interval)
@@ -92,7 +100,7 @@ func (cm *CronManager) ExecuteNow() error {
 		logger.Println("Executing firewall update job immediately...")
 	}
 
-	go cm.updateFunc() // 异步执行，避免阻塞
+	go updateFunc() // 异步执行，避免阻塞
 	return nil
 }
 

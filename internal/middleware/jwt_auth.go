@@ -3,6 +3,8 @@ package middleware
 import (
 	"FireFlow/internal/logger"
 	"FireFlow/internal/model"
+	"FireFlow/internal/response"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,13 +17,13 @@ import (
 const (
 	// JWT相关常量
 	DefaultTokenExpiration = 72 * time.Hour // 默认72小时过期
-	TokenIssuer           = "fireflow"
+	TokenIssuer            = "fireflow"
 )
 
 var (
-	jwtSecret         []byte        // JWT密钥
-	tokenExpiration   time.Duration // JWT过期时间
-	tokenValidator    TokenValidator // 令牌版本验证器
+	jwtSecret       []byte         // JWT密钥
+	tokenExpiration time.Duration  // JWT过期时间
+	tokenValidator  TokenValidator // 令牌版本验证器
 )
 
 // TokenValidator 令牌版本验证器接口
@@ -112,14 +114,14 @@ func ValidateToken(tokenString string) (*JWTClaims, error) {
 				logger.ErrorLogger.Warnf("Failed to get user token version: %v", err)
 				return nil, fmt.Errorf("token validation failed")
 			}
-			
+
 			if claims.TokenVersion != currentVersion {
-				logger.InfoLogger.Infof("Token version mismatch for user %d: token=%d, current=%d", 
+				logger.InfoLogger.Infof("Token version mismatch for user %d: token=%d, current=%d",
 					claims.UserID, claims.TokenVersion, currentVersion)
 				return nil, fmt.Errorf("token has been invalidated")
 			}
 		}
-		
+
 		return claims, nil
 	}
 
@@ -129,69 +131,39 @@ func ValidateToken(tokenString string) (*JWTClaims, error) {
 // JWTAuthMiddleware JWT认证中间件
 func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 从请求头获取token
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"success": false,
-				"message": "Authorization header is required",
-				"code":    "MISSING_AUTH_HEADER",
-			})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, response.New(401, nil, "Authorization header is required", "MISSING_AUTH_HEADER"))
 			return
 		}
-
-		// 检查Bearer前缀
 		tokenParts := strings.SplitN(authHeader, " ", 2)
-		if len(tokenParts) != 2 || tokenParts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"success": false,
-				"message": "Invalid authorization header format",
-				"code":    "INVALID_AUTH_HEADER",
-			})
-			c.Abort()
+		if len(tokenParts) != 2 || tokenParts[0] != "Bearer" || tokenParts[1] == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, response.New(401, nil, "Invalid authorization header format", "INVALID_AUTH_HEADER"))
 			return
 		}
-
-		tokenString := tokenParts[1]
-
-		// 验证token
-		claims, err := ValidateToken(tokenString)
+		claims, err := ValidateToken(tokenParts[1])
 		if err != nil {
 			logger.InfoLogger.Warnf("Invalid token: %v", err)
-
-			var message string
-			var code string
-
-			if err == jwt.ErrTokenExpired {
-				message = "Token has expired"
-				code = "TOKEN_EXPIRED"
-			} else if err == jwt.ErrTokenMalformed {
-				message = "Token is malformed"
-				code = "TOKEN_MALFORMED"
-			} else if err == jwt.ErrSignatureInvalid {
-				message = "Token signature is invalid"
-				code = "TOKEN_INVALID_SIGNATURE"
-			} else {
-				message = "Invalid token"
-				code = "TOKEN_INVALID"
-			}
-
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"success": false,
-				"message": message,
-				"code":    code,
-			})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, TokenErrorResponse(err))
 			return
 		}
-
-		// 将用户信息存储到context中
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("jwt_claims", claims)
-
 		c.Next()
+	}
+}
+
+func TokenErrorResponse(err error) response.Response {
+	switch {
+	case errors.Is(err, jwt.ErrTokenExpired):
+		return response.SessionExpired("TOKEN_EXPIRED")
+	case errors.Is(err, jwt.ErrTokenMalformed):
+		return response.New(401, nil, "Token is malformed", "TOKEN_MALFORMED")
+	case errors.Is(err, jwt.ErrSignatureInvalid):
+		return response.New(401, nil, "Token signature is invalid", "TOKEN_INVALID_SIGNATURE")
+	default:
+		return response.New(401, nil, "Invalid token", "TOKEN_INVALID")
 	}
 }
 

@@ -242,19 +242,21 @@ func (ac *AliyunClient) createSWASFirewallRule(instanceID string, rule *Firewall
 	}
 
 	// 如果存在相同的规则
+	previousCidrBlock := ""
 	if existingRules != nil && len(*existingRules) > 0 {
+		previousCidrBlock = (*existingRules)[0].CidrBlock
 		// 检查是否有IP相同的规则
-		var matched = false
+		matched := true
 		for _, existingRule := range *existingRules {
-			if existingRule.CidrBlock == rule.CidrBlock {
-				// 如果IP相同，直接返回现有规则
-				matched = true
-			} else {
+			if existingRule.CidrBlock != rule.CidrBlock {
 				matched = false
+				previousCidrBlock = existingRule.CidrBlock
+				break
 			}
 		}
 
 		if matched {
+			(*existingRules)[0].Changed = false
 			return &(*existingRules)[0], nil
 		}
 
@@ -300,13 +302,15 @@ func (ac *AliyunClient) createSWASFirewallRule(instanceID string, rule *Firewall
 
 	// 返回创建的规则信息
 	return &FirewallRuleResult{
-		Port:        rule.Port,
-		Protocol:    rule.Protocol,
-		CidrBlock:   rule.CidrBlock,
-		Action:      rule.Action,
-		Description: rule.Description,
-		Provider:    "Aliyun",
-		InstanceID:  instanceID,
+		Changed:           true,
+		PreviousCidrBlock: previousCidrBlock,
+		Port:              rule.Port,
+		Protocol:          rule.Protocol,
+		CidrBlock:         rule.CidrBlock,
+		Action:            rule.Action,
+		Description:       rule.Description,
+		Provider:          "Aliyun",
+		InstanceID:        instanceID,
 	}, nil
 }
 
@@ -347,10 +351,13 @@ func (ac *AliyunClient) createSingleRule(instanceID, securityGroupId string, rul
 	}
 
 	// 如果存在相同的规则
+	previousCidrBlock := ""
 	if existingRules != nil && len(*existingRules) > 0 {
+		previousCidrBlock = (*existingRules)[0].CidrBlock
 		// 检查是否有IP相同的规则
 		for _, existingRule := range *existingRules {
 			if existingRule.CidrBlock == rule.CidrBlock {
+				existingRule.Changed = false
 				return &existingRule, nil
 			}
 		}
@@ -384,13 +391,15 @@ func (ac *AliyunClient) createSingleRule(instanceID, securityGroupId string, rul
 
 	// 返回创建的规则信息
 	return &FirewallRuleResult{
-		Port:        rule.Port,
-		Protocol:    rule.Protocol,
-		CidrBlock:   rule.CidrBlock,
-		Action:      rule.Action,
-		Description: rule.Description,
-		Provider:    "Aliyun",
-		InstanceID:  instanceID,
+		Changed:           true,
+		PreviousCidrBlock: previousCidrBlock,
+		Port:              rule.Port,
+		Protocol:          rule.Protocol,
+		CidrBlock:         rule.CidrBlock,
+		Action:            rule.Action,
+		Description:       rule.Description,
+		Provider:          "Aliyun",
+		InstanceID:        instanceID,
 	}, nil
 }
 

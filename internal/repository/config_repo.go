@@ -20,6 +20,7 @@ type ConfigRepository interface {
 	GetDefaultCloudProvider() (*model.CloudProviderConfig, error)
 	ListCloudProviders() ([]model.CloudProviderConfig, error)
 	UpdateCloudProviderConfig(config *model.CloudProviderConfig) error
+	SetCloudProviderEnabled(id uint, enabled bool) error
 	DeleteCloudProviderConfig(id uint) error
 	HasAssociatedRules(cloudConfigID uint) (bool, error)
 }
@@ -120,12 +121,23 @@ func (r *configRepository) UpdateCloudProviderConfig(config *model.CloudProvider
 	}
 	// 使用Select方法明确指定要更新的字段，确保布尔字段也能正确更新
 	return r.db.Model(&model.CloudProviderConfig{}).Where("id = ?", config.ID).
-		Select("provider", "secret_id", "secret_key", "region", "type", "instance_id", "project_id", "extra", "is_default", "is_enabled", "description", "updated_at").
+		Select("provider", "secret_id", "secret_key", "region", "type", "instance_id", "project_id", "tenant_id", "subscription_id", "extra", "is_default", "is_enabled", "description", "updated_at").
 		Updates(config).Error
 }
 
 func (r *configRepository) DeleteCloudProviderConfig(id uint) error {
 	return r.db.Unscoped().Delete(&model.CloudProviderConfig{}, id).Error
+}
+
+func (r *configRepository) SetCloudProviderEnabled(id uint, enabled bool) error {
+	result := r.db.Model(&model.CloudProviderConfig{}).Where("id = ?", id).Update("is_enabled", enabled)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *configRepository) HasAssociatedRules(cloudConfigID uint) (bool, error) {

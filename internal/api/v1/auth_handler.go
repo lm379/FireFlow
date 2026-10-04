@@ -1,9 +1,11 @@
 package v1
 
 import (
+	"FireFlow/internal/dto"
 	"FireFlow/internal/logger"
 	"FireFlow/internal/middleware"
 	"FireFlow/internal/model"
+	"FireFlow/internal/response"
 	"FireFlow/internal/service"
 	"net/http"
 
@@ -27,45 +29,31 @@ func NewAuthHandler(authService service.AuthService) *AuthHandler {
 // @Accept json
 // @Produce json
 // @Param body body model.LoginRequest true "登录信息"
-// @Success 200 {object} model.LoginResponse
-// @Failure 400 {object} map[string]interface{}
-// @Failure 401 {object} map[string]interface{}
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 401 {object} response.Response
 // @Router /api/v1/auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req model.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.InfoLogger.Warnf("Invalid login request: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "Invalid request parameters",
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, response.ErrorCode(http.StatusBadRequest, "Invalid request parameters"))
 		return
 	}
 
 	// 参数验证
 	if req.Username == "" || req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "Username and password are required",
-		})
+		c.JSON(http.StatusBadRequest, response.ErrorCode(http.StatusBadRequest, "Username and password are required"))
 		return
 	}
 
-	response, err := h.authService.Login(req.Username, req.Password)
+	result, err := h.authService.Login(req.Username, req.Password)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
+		c.JSON(http.StatusUnauthorized, response.ErrorCode(http.StatusUnauthorized, err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Login successful",
-		"data":    response,
-	})
+	c.JSON(http.StatusOK, response.Success(dto.Login(result), "Login successful"))
 }
 
 // ChangePassword 修改密码
@@ -76,44 +64,31 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param body body model.ChangePasswordRequest true "密码修改信息"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} map[string]interface{}
-// @Failure 401 {object} map[string]interface{}
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 401 {object} response.Response
 // @Router /api/v1/auth/change-password [post]
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	var req model.ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "Invalid request parameters",
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, response.ErrorCode(http.StatusBadRequest, "Invalid request parameters"))
 		return
 	}
 
 	// 从JWT中获取用户ID
 	userID, exists := middleware.GetCurrentUserID(c)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "User not authenticated",
-		})
+		c.JSON(http.StatusUnauthorized, response.ErrorCode(http.StatusUnauthorized, "User not authenticated"))
 		return
 	}
 
 	err := h.authService.ChangePassword(userID, req.OldPassword, req.NewPassword)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, response.ErrorCode(http.StatusBadRequest, err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Password changed successfully",
-	})
+	c.JSON(http.StatusOK, response.Success(nil, "Password changed successfully"))
 }
 
 // VerifyToken 验证令牌
@@ -123,8 +98,8 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Param token query string true "JWT令牌"
-// @Success 200 {object} model.VerifyTokenResponse
-// @Failure 400 {object} map[string]interface{}
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
 // @Router /api/v1/auth/verify [get]
 func (h *AuthHandler) VerifyToken(c *gin.Context) {
 	token := c.Query("token")
@@ -137,27 +112,17 @@ func (h *AuthHandler) VerifyToken(c *gin.Context) {
 	}
 
 	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "Token is required",
-		})
+		c.JSON(http.StatusBadRequest, response.ErrorCode(http.StatusBadRequest, "Token is required"))
 		return
 	}
 
-	response, err := h.authService.VerifyToken(token)
+	result, err := h.authService.VerifyToken(token)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to verify token",
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, response.ErrorCode(http.StatusInternalServerError, "Failed to verify token"))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    response,
-	})
+	c.JSON(http.StatusOK, response.Success(dto.VerifyToken(result), "success"))
 }
 
 // GetCurrentUser 获取当前用户信息
@@ -166,33 +131,23 @@ func (h *AuthHandler) VerifyToken(c *gin.Context) {
 // @Tags auth
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} model.AuthUser
-// @Failure 401 {object} map[string]interface{}
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
 // @Router /api/v1/auth/me [get]
 func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	userID, exists := middleware.GetCurrentUserID(c)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "User not authenticated",
-		})
+		c.JSON(http.StatusUnauthorized, response.ErrorCode(http.StatusUnauthorized, "User not authenticated"))
 		return
 	}
 
 	user, err := h.authService.GetUserByID(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to get user information",
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, response.ErrorCode(http.StatusInternalServerError, "Failed to get user information"))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    user,
-	})
+	c.JSON(http.StatusOK, response.Success(dto.User(user), "success"))
 }
 
 // CheckFirstLogin 检查是否为首次登录
@@ -201,33 +156,23 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 // @Tags auth
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} map[string]interface{}
-// @Failure 401 {object} map[string]interface{}
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
 // @Router /api/v1/auth/first-login [get]
 func (h *AuthHandler) CheckFirstLogin(c *gin.Context) {
 	userID, exists := middleware.GetCurrentUserID(c)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "User not authenticated",
-		})
+		c.JSON(http.StatusUnauthorized, response.ErrorCode(http.StatusUnauthorized, "User not authenticated"))
 		return
 	}
 
 	isFirstLogin, err := h.authService.IsFirstLogin(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to check first login status",
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, response.ErrorCode(http.StatusInternalServerError, "Failed to check first login status"))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":        true,
-		"is_first_login": isFirstLogin,
-	})
+	c.JSON(http.StatusOK, response.Success(gin.H{"is_first_login": isFirstLogin}, "success"))
 }
 
 // Logout 用户退出登录
@@ -236,7 +181,7 @@ func (h *AuthHandler) CheckFirstLogin(c *gin.Context) {
 // @Tags auth
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} map[string]interface{}
+// @Success 200 {object} response.Response
 // @Router /api/v1/auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	// 在JWT无状态认证中，登出主要由客户端处理（删除令牌）
@@ -246,10 +191,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		logger.InfoLogger.Infof("User %s logged out", username)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Logout successful",
-	})
+	c.JSON(http.StatusOK, response.Success(nil, "Logout successful"))
 }
 
 // RefreshToken 刷新令牌
@@ -258,48 +200,35 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // @Tags auth
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} model.LoginResponse
-// @Failure 401 {object} map[string]interface{}
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
 // @Router /api/v1/auth/refresh [post]
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	userID, exists := middleware.GetCurrentUserID(c)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "User not authenticated",
-		})
+		c.JSON(http.StatusUnauthorized, response.ErrorCode(http.StatusUnauthorized, "User not authenticated"))
 		return
 	}
 
 	user, err := h.authService.GetUserByID(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to get user information",
-		})
+		c.JSON(http.StatusInternalServerError, response.ErrorCode(http.StatusInternalServerError, "Failed to get user information"))
 		return
 	}
 
 	// 生成新的令牌
 	token, expiresAt, err := middleware.GenerateToken(user)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to generate new token",
-		})
+		c.JSON(http.StatusInternalServerError, response.ErrorCode(http.StatusInternalServerError, "Failed to generate new token"))
 		return
 	}
 
-	response := &model.LoginResponse{
+	result := &model.LoginResponse{
 		Token:        token,
 		User:         user,
 		IsFirstLogin: user.IsFirstLogin,
 		ExpiresAt:    expiresAt,
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Token refreshed successfully",
-		"data":    response,
-	})
+	c.JSON(http.StatusOK, response.Success(dto.Login(result), "Token refreshed successfully"))
 }

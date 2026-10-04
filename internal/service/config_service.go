@@ -37,6 +37,7 @@ type ConfigService interface {
 	GetAllCloudConfigs() ([]model.CloudProviderConfig, error)
 	CreateCloudConfig(config *model.CloudProviderConfig) error
 	UpdateCloudConfig(config *model.CloudProviderConfig) error
+	SetCloudConfigEnabled(id uint, enabled bool) error
 	DeleteCloudConfig(id uint) error
 	TestCloudConfig(id uint) (*CloudTestResult, error)
 
@@ -120,6 +121,10 @@ func (s *configService) CreateCloudConfig(config *model.CloudProviderConfig) err
 
 func (s *configService) UpdateCloudConfig(config *model.CloudProviderConfig) error {
 	return s.configRepo.UpdateCloudProviderConfig(config)
+}
+
+func (s *configService) SetCloudConfigEnabled(id uint, enabled bool) error {
+	return s.configRepo.SetCloudProviderEnabled(id, enabled)
 }
 
 func (s *configService) DeleteCloudConfig(id uint) error {

@@ -96,7 +96,9 @@ func (hc *HuaweiClient) CreateFirewallRule(instanceID string, rule *FirewallRule
 	}
 
 	// 如果存在相同的规则
+	previousCidrBlock := ""
 	if existingRule != nil {
+		previousCidrBlock = existingRule.CidrBlock
 		// 如果IP相同，直接返回现有规则
 		if existingRule.CidrBlock == rule.CidrBlock {
 			// if existingRule.Description != rule.Description {
@@ -106,6 +108,7 @@ func (hc *HuaweiClient) CreateFirewallRule(instanceID string, rule *FirewallRule
 			// 	logger.Printf("Rule already exists with same IP (Protocol=%s, Port=%s, CidrBlock=%s), skipping creation",
 			// 		existingRule.Protocol, existingRule.Port, existingRule.CidrBlock)
 			// }
+			existingRule.Changed = false
 			return existingRule, nil
 		}
 
@@ -158,13 +161,15 @@ func (hc *HuaweiClient) CreateFirewallRule(instanceID string, rule *FirewallRule
 	}
 
 	result := &FirewallRuleResult{
-		Port:        rule.Port,
-		Protocol:    rule.Protocol,
-		CidrBlock:   rule.CidrBlock,
-		Action:      rule.Action,
-		Description: rule.Description,
-		Provider:    "HuaweiCloud",
-		InstanceID:  instanceID,
+		Changed:           true,
+		PreviousCidrBlock: previousCidrBlock,
+		Port:              rule.Port,
+		Protocol:          rule.Protocol,
+		CidrBlock:         rule.CidrBlock,
+		Action:            rule.Action,
+		Description:       rule.Description,
+		Provider:          "HuaweiCloud",
+		InstanceID:        instanceID,
 	}
 
 	// logger.Printf("Successfully created Huawei Cloud security group rule: %+v", result)
@@ -246,6 +251,7 @@ func (hc *HuaweiClient) UpdateFirewallRule(instanceID string, ruleSpec *Firewall
 	newCidrBlock := fmt.Sprintf("%s/32", newIP)
 	if targetRule.CidrBlock == newCidrBlock {
 		// logger.Printf("Rule with description '%s' already has the correct IP %s, skipping update", ruleSpec.Description, newIP)
+		targetRule.Changed = false
 		return targetRule, nil
 	}
 
@@ -261,7 +267,12 @@ func (hc *HuaweiClient) UpdateFirewallRule(instanceID string, ruleSpec *Firewall
 	newRule := *ruleSpec
 	newRule.CidrBlock = newCidrBlock
 
-	return hc.CreateFirewallRule(instanceID, &newRule)
+	result, err := hc.CreateFirewallRule(instanceID, &newRule)
+	if err == nil && result != nil {
+		result.Changed = true
+		result.PreviousCidrBlock = targetRule.CidrBlock
+	}
+	return result, err
 }
 
 func (hc *HuaweiClient) ListFirewallRules(instanceID string) ([]*FirewallRuleResult, error) {

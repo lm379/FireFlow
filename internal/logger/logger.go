@@ -1,21 +1,24 @@
 package logger
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 
+	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // 全局logger实例
 var (
-	InfoLogger  *logrus.Logger
-	ErrorLogger *logrus.Logger
-	GinLogger   *logrus.Logger
+	InfoLogger  = newLogger(os.Stdout, logrus.InfoLevel)
+	ErrorLogger = newLogger(os.Stderr, logrus.WarnLevel)
+	GinLogger   = newLogger(io.Discard, logrus.InfoLevel)
+	fileOutputs []*lumberjack.Logger
 )
 
 // Config 日志配置结构
@@ -23,9 +26,9 @@ type Config struct {
 	Level            string
 	EnableGinLogger  bool
 	EnableFileOutput bool
-	MaxFileSize      int // 单个日志文件最大大小(MB)
-	MaxBackups       int // 保留的备份文件数量
-	MaxAge           int // 保留文件的最大天数
+	MaxFileSize      int  // 单个日志文件最大大小(MB)
+	MaxBackups       int  // 保留的备份文件数量
+	MaxAge           int  // 保留文件的最大天数
 	Compress         bool // 是否压缩旧文件
 }
 
@@ -35,139 +38,113 @@ func Init() error {
 		Level:            "info",
 		EnableGinLogger:  true,
 		EnableFileOutput: true,
-		MaxFileSize:      100, // 100MB
-		MaxBackups:       7,   // 保留7个备份文件
-		MaxAge:           30,  // 保留30天
+		MaxFileSize:      100,  // 100MB
+		MaxBackups:       7,    // 保留7个备份文件
+		MaxAge:           30,   // 保留30天
 		Compress:         true, // 压缩旧文件
 	})
 }
 
 // InitWithConfig 使用配置初始化日志系统
 func InitWithConfig(config Config) error {
-	// 创建日志目录
-	logDir := "./configs/logs"
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("failed to create log directory: %v", err)
-	}
+	return initWithConfig(config, "./configs/logs", os.Stdout, os.Stderr)
+}
 
-	// 设置默认值
+func initWithConfig(config Config, logDir string, stdout, stderr io.Writer) error {
+	if config.EnableFileOutput {
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			return fmt.Errorf("create log directory: %w", err)
+		}
+	}
+	if config.MaxFileSize == 0 {
+		config.MaxFileSize = 100
+	}
 	if config.MaxBackups == 0 {
 		config.MaxBackups = 7
 	}
 	if config.MaxAge == 0 {
 		config.MaxAge = 30
 	}
-	if config.MaxFileSize == 0 {
-		config.MaxFileSize = 100
-	}
-
-	// 根据配置决定输出位置
-	var infoOutputs []io.Writer
-	var errorOutputs []io.Writer
-	var ginOutputs []io.Writer
-
-	// 总是输出到控制台
-	infoOutputs = append(infoOutputs, os.Stdout)
-	errorOutputs = append(errorOutputs, os.Stderr)
-	ginOutputs = append(ginOutputs, os.Stdout)
-
-	// 根据配置决定是否输出到文件
-	if config.EnableFileOutput {
-		// 创建info日志轮转器
-		infoRotator := &lumberjack.Logger{
-			Filename:   filepath.Join(logDir, "app.log"),
-			MaxSize:    config.MaxFileSize, // MB
-			MaxBackups: config.MaxBackups,
-			MaxAge:     config.MaxAge, // days
-			Compress:   config.Compress,
-		}
-		infoOutputs = append(infoOutputs, infoRotator)
-
-		// 创建error日志轮转器
-		errorRotator := &lumberjack.Logger{
-			Filename:   filepath.Join(logDir, "error.log"),
-			MaxSize:    config.MaxFileSize, // MB
-			MaxBackups: config.MaxBackups,
-			MaxAge:     config.MaxAge, // days
-			Compress:   config.Compress,
-		}
-		errorOutputs = append(errorOutputs, errorRotator)
-
-		// 只有启用Gin日志时才创建gin日志轮转器
-		if config.EnableGinLogger {
-			ginRotator := &lumberjack.Logger{
-				Filename:   filepath.Join(logDir, "gin.log"),
-				MaxSize:    config.MaxFileSize, // MB
-				MaxBackups: config.MaxBackups,
-				MaxAge:     config.MaxAge, // days
-				Compress:   config.Compress,
-			}
-			ginOutputs = append(ginOutputs, ginRotator)
-		}
-	}
-
-	// 解析日志级别
 	level, err := logrus.ParseLevel(config.Level)
 	if err != nil {
-		level = logrus.InfoLevel // 默认级别
+		level = logrus.InfoLevel
 	}
 
-	// 设置info logger
-	InfoLogger = logrus.New()
-	InfoLogger.SetOutput(io.MultiWriter(infoOutputs...))
-	InfoLogger.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp:   true,
-		TimestampFormat: "2006-01-02 15:04:05 MST",
-	})
-	InfoLogger.SetLevel(level)
-
-	// 设置error logger
-	ErrorLogger = logrus.New()
-	ErrorLogger.SetOutput(io.MultiWriter(errorOutputs...))
-	ErrorLogger.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp:   true,
-		TimestampFormat: "2006-01-02 15:04:05 MST",
-	})
-	ErrorLogger.SetLevel(logrus.WarnLevel)
-
-	// 设置gin logger（只有启用时才设置）
+	var rotators []*lumberjack.Logger
+	output := func(console io.Writer, filename string) io.Writer {
+		if !config.EnableFileOutput {
+			return console
+		}
+		rotator := &lumberjack.Logger{
+			Filename:   filepath.Join(logDir, filename),
+			MaxSize:    config.MaxFileSize,
+			MaxBackups: config.MaxBackups,
+			MaxAge:     config.MaxAge,
+			Compress:   config.Compress,
+		}
+		rotators = append(rotators, rotator)
+		return io.MultiWriter(console, rotator)
+	}
+	info := newLogger(output(stdout, "app.log"), level)
+	errorLog := newLogger(output(stderr, "error.log"), logrus.WarnLevel)
+	ginOutput := io.Writer(io.Discard)
 	if config.EnableGinLogger {
-		GinLogger = logrus.New()
-		GinLogger.SetOutput(io.MultiWriter(ginOutputs...))
-		GinLogger.SetFormatter(&logrus.TextFormatter{
-			FullTimestamp:   true,
-			TimestampFormat: "2006-01-02 15:04:05 MST",
-		})
-		GinLogger.SetLevel(level)
-	} else {
-		// 如果不启用Gin日志，创建一个空的logger
-		GinLogger = logrus.New()
-		GinLogger.SetOutput(io.Discard)
+		ginOutput = output(stdout, "gin.log")
 	}
+	ginLog := newLogger(ginOutput, level)
 
-	// 设置标准库log输出到app日志文件（普通信息）和控制台
-	log.SetOutput(io.MultiWriter(infoOutputs...))
+	// Initialization takes place before request handling starts.
+	if err := Close(); err != nil {
+		return err
+	}
+	fileOutputs = rotators
+	InfoLogger, ErrorLogger, GinLogger = info, errorLog, ginLog
+	log.SetOutput(info.Out)
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
-	// InfoLogger.Infof("Logger initialized, logs will be saved to %s", logDir)
 	return nil
 }
 
-// GetGinLogWriter 获取GIN日志写入器
-func GetGinLogWriter() io.Writer {
-	logDir := "./configs/logs"
-	
-	// 使用lumberjack进行日志轮转
-	return &lumberjack.Logger{
-		Filename:   filepath.Join(logDir, "gin.log"),
-		MaxSize:    100, // MB
-		MaxBackups: 7,   // 保留7个备份文件
-		MaxAge:     30,  // 保留30天
-		Compress:   true, // 压缩旧文件
-	}
+func newLogger(output io.Writer, level logrus.Level) *logrus.Logger {
+	instance := logrus.New()
+	instance.SetOutput(output)
+	instance.SetLevel(level)
+	instance.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05 MST",
+	})
+	return instance
 }
 
-// 便捷函数，不同级别的日志
+// Close releases the rotating file writers at shutdown or reinitialization.
+func Close() error {
+	var failures []error
+	for _, output := range fileOutputs {
+		if err := output.Close(); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	fileOutputs = nil
+	return errors.Join(failures...)
+}
+
+// GetGinLogWriter reuses the configured output, including the disabled state.
+func GetGinLogWriter() io.Writer { return GinLogger.Out }
+
+// GinMiddleware delegates request timing and formatting to Gin.
+func GinMiddleware() gin.HandlerFunc {
+	return gin.LoggerWithConfig(gin.LoggerConfig{
+		Output:          GetGinLogWriter(),
+		SkipQueryString: true,
+		Skip: func(c *gin.Context) bool {
+			level := logrus.InfoLevel
+			if c.Writer.Status() >= 400 {
+				level = logrus.ErrorLevel
+			}
+			return !GinLogger.IsLevelEnabled(level)
+		},
+	})
+}
+
 func Printf(format string, args ...interface{}) {
 	InfoLogger.Infof(format, args...)
 }

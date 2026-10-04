@@ -64,13 +64,15 @@ type FirewallRuleSpec struct {
 
 // 防火墙规则结果
 type FirewallRuleResult struct {
-	Port        string `json:"port"`
-	Protocol    string `json:"protocol"`
-	CidrBlock   string `json:"cidr_block"`
-	Action      string `json:"action"`
-	Description string `json:"description"`
-	Provider    string `json:"provider"`
-	InstanceID  string `json:"instance_id"`
+	Changed           bool   `json:"changed"`
+	PreviousCidrBlock string `json:"previous_cidr_block,omitempty"`
+	Port              string `json:"port"`
+	Protocol          string `json:"protocol"`
+	CidrBlock         string `json:"cidr_block"`
+	Action            string `json:"action"`
+	Description       string `json:"description"`
+	Provider          string `json:"provider"`
+	InstanceID        string `json:"instance_id"`
 }
 
 func NewTencentClient(config TencentConfig) (*TencentClient, error) {
@@ -217,11 +219,14 @@ func (tc *TencentClient) createLighthouseFirewallRule(instanceID string, rule *F
 	}
 
 	// 如果存在相同的规则
+	previousCidrBlock := ""
 	if existingRule != nil {
+		previousCidrBlock = existingRule.CidrBlock
 		// 如果IP相同，直接返回现有规则
 		if existingRule.CidrBlock == rule.CidrBlock {
 			// logger.Printf("Rule already exists with same IP (Protocol=%s, Port=%s, CidrBlock=%s), skipping creation",
 			// 	existingRule.Protocol, existingRule.Port, existingRule.CidrBlock)
+			existingRule.Changed = false
 			return existingRule, nil
 		}
 
@@ -260,13 +265,15 @@ func (tc *TencentClient) createLighthouseFirewallRule(instanceID string, rule *F
 	}
 
 	result := &FirewallRuleResult{
-		Port:        rule.Port,
-		Protocol:    rule.Protocol,
-		CidrBlock:   rule.CidrBlock,
-		Action:      rule.Action,
-		Description: rule.Description,
-		Provider:    "TencentCloud",
-		InstanceID:  instanceID,
+		Changed:           true,
+		PreviousCidrBlock: previousCidrBlock,
+		Port:              rule.Port,
+		Protocol:          rule.Protocol,
+		CidrBlock:         rule.CidrBlock,
+		Action:            rule.Action,
+		Description:       rule.Description,
+		Provider:          "TencentCloud",
+		InstanceID:        instanceID,
 	}
 
 	// logger.Printf("Successfully created Lighthouse firewall rule: %+v", result)

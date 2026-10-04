@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"FireFlow/internal/response"
 	"FireFlow/pkg/cloud"
 	"net/http"
 	"strconv"
@@ -16,29 +17,6 @@ func NewRegionHandler() *RegionHandler {
 	return &RegionHandler{}
 }
 
-// RegionListResponse 地域列表响应
-type RegionListResponse struct {
-	Code    int                  `json:"code"`
-	Message string               `json:"message"`
-	Data    []cloud.RegionOption `json:"data"`
-	Total   int                  `json:"total"`
-}
-
-// SearchRegionResponse 地域搜索响应
-type SearchRegionResponse struct {
-	Code    int            `json:"code"`
-	Message string         `json:"message"`
-	Data    []cloud.Region `json:"data"`
-	Total   int            `json:"total"`
-}
-
-// ProviderListResponse 云厂商列表响应
-type ProviderListResponse struct {
-	Code    int      `json:"code"`
-	Message string   `json:"message"`
-	Data    []string `json:"data"`
-}
-
 // GetRegions 获取地域列表
 // @Summary 获取地域列表
 // @Description 根据云厂商获取地域列表，用于前端下拉框选择
@@ -48,16 +26,12 @@ type ProviderListResponse struct {
 // @Param provider query string true "云厂商" Enums(aliyun, tencent, huawei)
 // @Param page query int false "页码" default(1)
 // @Param limit query int false "每页数量" default(50)
-// @Success 200 {object} RegionListResponse
+// @Success 200 {object} response.Response
 // @Router /api/v1/regions [get]
 func (h *RegionHandler) GetRegions(c *gin.Context) {
 	provider := c.Query("provider")
 	if provider == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "provider参数不能为空",
-			"data":    nil,
-		})
+		c.JSON(http.StatusBadRequest, response.ErrorCode(http.StatusBadRequest, "provider参数不能为空"))
 		return
 	}
 
@@ -87,12 +61,7 @@ func (h *RegionHandler) GetRegions(c *gin.Context) {
 		options = options[start:end]
 	}
 
-	c.JSON(http.StatusOK, RegionListResponse{
-		Code:    200,
-		Message: "success",
-		Data:    options,
-		Total:   total,
-	})
+	c.JSON(http.StatusOK, response.Success(gin.H{"items": options, "total": total}, "success"))
 }
 
 // SearchRegions 搜索地域
@@ -105,7 +74,7 @@ func (h *RegionHandler) GetRegions(c *gin.Context) {
 // @Param search query string false "搜索关键词"
 // @Param page query int false "页码" default(1)
 // @Param limit query int false "每页数量" default(20)
-// @Success 200 {object} SearchRegionResponse
+// @Success 200 {object} response.Response
 // @Router /api/v1/regions [get]
 func (h *RegionHandler) SearchRegions(c *gin.Context) {
 	provider := c.Query("provider")
@@ -137,12 +106,7 @@ func (h *RegionHandler) SearchRegions(c *gin.Context) {
 		regions = regions[start:end]
 	}
 
-	c.JSON(http.StatusOK, SearchRegionResponse{
-		Code:    200,
-		Message: "success",
-		Data:    regions,
-		Total:   total,
-	})
+	c.JSON(http.StatusOK, response.Success(gin.H{"items": regions, "total": total}, "success"))
 }
 
 // GetProviders 获取支持的云厂商列表
@@ -151,16 +115,12 @@ func (h *RegionHandler) SearchRegions(c *gin.Context) {
 // @Tags regions
 // @Accept json
 // @Produce json
-// @Success 200 {object} ProviderListResponse
+// @Success 200 {object} response.Response
 // @Router /api/v1/providers [get]
 func (h *RegionHandler) GetProviders(c *gin.Context) {
 	providers := cloud.GetProviders()
 
-	c.JSON(http.StatusOK, ProviderListResponse{
-		Code:    200,
-		Message: "success",
-		Data:    providers,
-	})
+	c.JSON(http.StatusOK, response.Success(providers, "success"))
 }
 
 // GetRegionByCode 根据代码获取地域信息
@@ -169,36 +129,24 @@ func (h *RegionHandler) GetProviders(c *gin.Context) {
 // @Tags regions
 // @Accept json
 // @Produce json
-// @Param code path string true "地域代码"  
+// @Param code path string true "地域代码"
 // @Param provider query string true "云厂商"
-// @Success 200 {object} map[string]interface{}
+// @Success 200 {object} response.Response
 // @Router /api/v1/regions/{code} [get]
 func (h *RegionHandler) GetRegionByCode(c *gin.Context) {
 	provider := c.Query("provider")
 	code := c.Param("code") // 改为从路径参数获取
 
 	if provider == "" || code == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "provider和code参数不能为空",
-			"data":    nil,
-		})
+		c.JSON(http.StatusBadRequest, response.ErrorCode(http.StatusBadRequest, "provider和code参数不能为空"))
 		return
 	}
 
 	region := cloud.GetRegionByCode(provider, code)
 	if region == nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "未找到对应的地域信息",
-			"data":    nil,
-		})
+		c.JSON(http.StatusNotFound, response.ErrorCode(http.StatusNotFound, "未找到对应的地域信息"))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "success",
-		"data":    region,
-	})
+	c.JSON(http.StatusOK, response.Success(region, "success"))
 }

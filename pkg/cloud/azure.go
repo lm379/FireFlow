@@ -106,9 +106,12 @@ func (azc *AzureClient) CreateFirewallRule(instanceID string, rule *FirewallRule
 	}
 
 	// 如果存在相同的规则
+	previousCidrBlock := ""
 	if existingRule != nil {
+		previousCidrBlock = existingRule.CidrBlock
 		// 如果 IP 相同，直接返回现有规则
 		if existingRule.CidrBlock == rule.CidrBlock {
+			existingRule.Changed = false
 			return existingRule, nil
 		}
 
@@ -169,13 +172,15 @@ func (azc *AzureClient) CreateFirewallRule(instanceID string, rule *FirewallRule
 	}
 
 	result := &FirewallRuleResult{
-		Port:        rule.Port,
-		Protocol:    rule.Protocol,
-		CidrBlock:   rule.CidrBlock,
-		Action:      rule.Action,
-		Description: rule.Description,
-		Provider:    "Azure",
-		InstanceID:  instanceID,
+		Changed:           true,
+		PreviousCidrBlock: previousCidrBlock,
+		Port:              rule.Port,
+		Protocol:          rule.Protocol,
+		CidrBlock:         rule.CidrBlock,
+		Action:            rule.Action,
+		Description:       rule.Description,
+		Provider:          "Azure",
+		InstanceID:        instanceID,
 	}
 
 	return result, nil
@@ -241,6 +246,7 @@ func (azc *AzureClient) UpdateFirewallRule(instanceID string, ruleSpec *Firewall
 	// 检查 IP 是否已经一致
 	newCidrBlock := fmt.Sprintf("%s/32", newIP)
 	if targetRule.CidrBlock == newCidrBlock {
+		targetRule.Changed = false
 		return targetRule, nil
 	}
 
@@ -253,7 +259,12 @@ func (azc *AzureClient) UpdateFirewallRule(instanceID string, ruleSpec *Firewall
 	// 创建新规则
 	newRule := *ruleSpec
 	newRule.CidrBlock = newCidrBlock
-	return azc.CreateFirewallRule(instanceID, &newRule)
+	result, err := azc.CreateFirewallRule(instanceID, &newRule)
+	if err == nil && result != nil {
+		result.Changed = true
+		result.PreviousCidrBlock = targetRule.CidrBlock
+	}
+	return result, err
 }
 
 func (azc *AzureClient) ListFirewallRules(instanceID string) ([]*FirewallRuleResult, error) {

@@ -43,10 +43,11 @@ func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallSe
 
 		ruleRoutes := protectedRoutes.Group("/rules")
 		{
-			ruleRoutes.GET("/", firewallHandler.GetRules)         // GET /api/v1/rules
-			ruleRoutes.GET("/:id", firewallHandler.GetRule)       // GET /api/v1/rules/:id
-			ruleRoutes.POST("/", firewallHandler.CreateRule)      // POST /api/v1/rules
-			ruleRoutes.PUT("/:id", firewallHandler.UpdateRule)    // PUT /api/v1/rules/:id
+			ruleRoutes.GET("/", firewallHandler.GetRules)      // GET /api/v1/rules
+			ruleRoutes.GET("/:id", firewallHandler.GetRule)    // GET /api/v1/rules/:id
+			ruleRoutes.POST("/", firewallHandler.CreateRule)   // POST /api/v1/rules
+			ruleRoutes.PUT("/:id", firewallHandler.UpdateRule) // PUT /api/v1/rules/:id
+			ruleRoutes.POST("/:id/status", firewallHandler.SetStatus)
 			ruleRoutes.DELETE("/:id", firewallHandler.DeleteRule) // DELETE /api/v1/rules/:id
 			ruleRoutes.PATCH("/:id", firewallHandler.ExecuteRule) // PATCH /api/v1/rules/:id (action=execute)
 		}
@@ -54,10 +55,11 @@ func RegisterRoutes(router *gin.RouterGroup, firewallService *service.FirewallSe
 		// 云服务配置路由
 		cloudConfigRoutes := protectedRoutes.Group("/cloud-configs")
 		{
-			cloudConfigRoutes.GET("/", cloudConfigHandler.GetCloudConfigs)             // GET /api/v1/cloud-configs
-			cloudConfigRoutes.GET("/:id", cloudConfigHandler.GetCloudConfig)           // GET /api/v1/cloud-configs/:id
-			cloudConfigRoutes.POST("/", cloudConfigHandler.CreateCloudConfig)          // POST /api/v1/cloud-configs
-			cloudConfigRoutes.PUT("/:id", cloudConfigHandler.UpdateCloudConfig)        // PUT /api/v1/cloud-configs/:id
+			cloudConfigRoutes.GET("/", cloudConfigHandler.GetCloudConfigs)      // GET /api/v1/cloud-configs
+			cloudConfigRoutes.GET("/:id", cloudConfigHandler.GetCloudConfig)    // GET /api/v1/cloud-configs/:id
+			cloudConfigRoutes.POST("/", cloudConfigHandler.CreateCloudConfig)   // POST /api/v1/cloud-configs
+			cloudConfigRoutes.PUT("/:id", cloudConfigHandler.UpdateCloudConfig) // PUT /api/v1/cloud-configs/:id
+			cloudConfigRoutes.POST("/:id/status", cloudConfigHandler.SetStatus)
 			cloudConfigRoutes.DELETE("/:id", cloudConfigHandler.DeleteCloudConfig)     // DELETE /api/v1/cloud-configs/:id
 			cloudConfigRoutes.POST("/:id/actions", cloudConfigHandler.TestCloudConfig) // POST /api/v1/cloud-configs/:id/actions (action=test)
 		}

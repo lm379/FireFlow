@@ -14,6 +14,7 @@ type FirewallRepository interface {
 	GetByID(id uint) (*model.FirewallRule, error)
 	Create(rule *model.FirewallRule) error
 	Update(rule *model.FirewallRule) error
+	SetEnabled(id uint, enabled bool) error
 	UpdateIP(id uint, ip string) error
 	GetOldestUpdatedTime() (*time.Time, error)
 	Delete(id uint) error
@@ -52,19 +53,19 @@ func (r *firewallRepo) retryOnBusy(fn func() error, maxRetries int) error {
 
 func (r *firewallRepo) GetAllEnabled() ([]model.FirewallRule, error) {
 	var rules []model.FirewallRule
-	err := r.db.Where("enabled = ?", true).Find(&rules).Error
+	err := r.db.Preload("CloudConfig").Where("enabled = ?", true).Find(&rules).Error
 	return rules, err
 }
 
 func (r *firewallRepo) GetAll() ([]model.FirewallRule, error) {
 	var rules []model.FirewallRule
-	err := r.db.Find(&rules).Error
+	err := r.db.Preload("CloudConfig").Find(&rules).Error
 	return rules, err
 }
 
 func (r *firewallRepo) GetByID(id uint) (*model.FirewallRule, error) {
 	var rule model.FirewallRule
-	err := r.db.First(&rule, id).Error
+	err := r.db.Preload("CloudConfig").First(&rule, id).Error
 	if err != nil {
 		return nil, err
 	}
@@ -72,14 +73,14 @@ func (r *firewallRepo) GetByID(id uint) (*model.FirewallRule, error) {
 }
 
 func (r *firewallRepo) Create(rule *model.FirewallRule) error {
-	return r.db.Create(rule).Error
+	return r.db.Omit("CloudConfig").Create(rule).Error
 }
 
 func (r *firewallRepo) Update(rule *model.FirewallRule) error {
 	// 使用Select方法明确指定要更新的字段，确保布尔字段也能正确更新，但保留created_at
 	return r.retryOnBusy(func() error {
 		return r.db.Model(&model.FirewallRule{}).Where("id = ?", rule.ID).
-			Select("provider", "cloud_config_id", "instance_id", "port", "protocol", "rule_id", "last_ip", "enabled", "remark", "updated_at").
+			Select("cloud_config_id", "port", "protocol", "last_ip", "enabled", "remark", "updated_at").
 			Updates(rule).Error
 	}, 3)
 }
@@ -87,6 +88,19 @@ func (r *firewallRepo) Update(rule *model.FirewallRule) error {
 func (r *firewallRepo) UpdateIP(id uint, ip string) error {
 	return r.retryOnBusy(func() error {
 		return r.db.Model(&model.FirewallRule{}).Where("id = ?", id).Update("last_ip", ip).Error
+	}, 3)
+}
+
+func (r *firewallRepo) SetEnabled(id uint, enabled bool) error {
+	return r.retryOnBusy(func() error {
+		result := r.db.Model(&model.FirewallRule{}).Where("id = ?", id).Update("enabled", enabled)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	}, 3)
 }
 
